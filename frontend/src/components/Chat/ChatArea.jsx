@@ -29,7 +29,7 @@ export default function ChatArea({
       <ChatHeader activeContact={activeContact} />
 
       {/* Message list */}
-      <div className="flex-1 p-4 overflow-y-auto bg-secondary-50 dark:bg-secondary-900/50">
+      <div className="flex-1 p-4 overflow-y-auto bg-background">
         <MessageList
           messages={messages}
           loading={loading}
@@ -38,14 +38,14 @@ export default function ChatArea({
       </div>
 
       {/* Input box */}
-      <div className="p-4 border-t border-secondary-200 dark:border-secondary-700 bg-card dark:bg-secondary-800">
+      <div className="p-4 border-t border-border bg-card">
         <form onSubmit={onSubmit} className="flex gap-2">
           <input
             type="text"
             placeholder={isConnected ? "Type a message…" : "Reconnecting…"}
             value={messageText}
             onChange={(e) => setMessageText(e.target.value)}
-            className="flex-1 p-2 border border-secondary-200 dark:border-secondary-600 rounded-md bg-white dark:bg-secondary-700 text-secondary-900 dark:text-secondary-100"
+            className="flex-1 p-2 border border-input rounded-md bg-background text-foreground placeholder:text-muted-foreground"
             disabled={!isConnected}
           />
           <button
@@ -53,8 +53,8 @@ export default function ChatArea({
             className={cn(
               "p-2 rounded-md transition-colors",
               isConnected
-                ? "bg-primary-500 hover:bg-primary-600 text-white"
-                : "bg-secondary-400 text-secondary-700 cursor-not-allowed"
+                ? "bg-primary hover:bg-primary/90 text-primary-foreground"
+                : "bg-muted text-muted-foreground cursor-not-allowed"
             )}
             disabled={!isConnected || !messageText.trim()}
           >
@@ -62,12 +62,12 @@ export default function ChatArea({
           </button>
         </form>
         {!isConnected && (
-          <p className="mt-2 text-xs text-warning-600 dark:text-warning-400">
+          <p className="mt-2 text-xs text-warning">
             Disconnected. Reconnecting…
           </p>
         )}
         {connectError && (
-          <p className="mt-1 text-xs text-error-600 dark:text-error-400">Error: {connectError}</p>
+          <p className="mt-1 text-xs text-destructive">Error: {connectError}</p>
         )}
       </div>
     </div>

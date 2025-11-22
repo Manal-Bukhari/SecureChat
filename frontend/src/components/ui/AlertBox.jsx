@@ -24,4 +24,3 @@ const AlertBox = ({ message, onClose }) => {
 };
 
 export default AlertBox;
-

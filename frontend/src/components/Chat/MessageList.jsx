@@ -3,12 +3,12 @@ import { cn } from '../../lib/utils';
 
 export default function MessageList({ messages, loading, currentUserId }) {
   if (loading && messages.length === 0) {
-    return <div className="flex justify-center p-4 text-secondary-600 dark:text-secondary-400">Loading messages...</div>;
+    return <div className="flex justify-center p-4 text-muted-foreground">Loading messages...</div>;
   }
 
   if (messages.length === 0) {
     return (
-      <div className="flex justify-center p-4 text-secondary-500 dark:text-secondary-400">
+      <div className="flex justify-center p-4 text-muted-foreground">
         No messages yet. Start the conversation!
       </div>
     );
@@ -17,14 +17,14 @@ export default function MessageList({ messages, loading, currentUserId }) {
   return (
     <div className="space-y-4">
       {messages.map(msg => (
-        <MessageBubble key={msg.id} message={msg} />
+        <MessageBubble key={msg.id} message={msg} currentUserId={currentUserId} />
       ))}
     </div>
   );
 }
 
-function MessageBubble({ message }) {
-  const isMine = message.senderId === 'me';
+function MessageBubble({ message, currentUserId }) {
+  const isMine = message.senderId === currentUserId || message.senderId === 'me';
   
   return (
     <div
@@ -36,22 +36,22 @@ function MessageBubble({ message }) {
       <div className={cn(
         "max-w-xs sm:max-w-md rounded-2xl px-4 py-2",
         isMine 
-          ? "bg-primary-500 text-white rounded-tr-none"
-          : "bg-secondary-200 dark:bg-secondary-700 text-secondary-900 dark:text-secondary-100 rounded-tl-none"
+          ? "bg-primary text-primary-foreground rounded-tr-none"
+          : "bg-muted text-muted-foreground rounded-tl-none"
       )}>
-        <p>{message.text}</p>
+        <p className={cn(isMine ? "text-primary-foreground" : "text-foreground")}>{message.text}</p>
         <div className={cn(
           "text-xs mt-1 flex justify-end",
           isMine
-            ? "text-primary-100"
-            : "text-secondary-500 dark:text-secondary-400"
+            ? "text-primary-foreground/70"
+            : "text-muted-foreground"
         )}>
           {message.timestamp}
           {message.pending && (
             <span className="ml-2">⏳</span>
           )}
           {message.failed && (
-            <span className="ml-2 text-error-300">❌</span>
+            <span className="ml-2 text-destructive">❌</span>
           )}
         </div>
       </div>

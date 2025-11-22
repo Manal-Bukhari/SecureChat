@@ -113,4 +113,3 @@ const chatSlice = createSlice({
 
 export const { setSelectedContact, clearChatState, addMessage } = chatSlice.actions;
 export default chatSlice.reducer;
-

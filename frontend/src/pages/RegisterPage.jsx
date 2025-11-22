@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import { toast } from 'react-hot-toast';
 import { Button } from '../components/ui/Button';
-import axiosInstance from '../store/axiosInstance';
+import { signUp } from '../store/slices/userSlice';
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -12,7 +13,8 @@ export default function RegisterPage() {
     password: "",
     gender: "",
   });
-  const [loading, setLoading] = useState(false);
+  const dispatch = useDispatch();
+  const { loading, error } = useSelector((state) => state.user);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -36,28 +38,20 @@ export default function RegisterPage() {
       return;
     }
 
-    try {
-      setLoading(true);
-      const res = await axiosInstance.post("/auth/signup", formData);
-      toast.success(`Welcome, ${res.data.user.fullName || 'User'}! Account created successfully.`);
-      
-      if (res.data.token) {
-        sessionStorage.setItem("token", res.data.token);
-        sessionStorage.setItem("user", JSON.stringify(res.data.user));
-      }
-      
+    const response = await dispatch(signUp(formData));
+    
+    if (response.meta.requestStatus === "fulfilled") {
+      toast.success(`Welcome, ${response.payload.user.fullName || 'User'}! Account created successfully.`);
       navigate("/chat");
-    } catch (err) {
-      toast.error(err.response?.data?.error || "Signup failed.");
-    } finally {
-      setLoading(false);
+    } else {
+      toast.error(response.payload || "Signup failed.");
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-secondary-50 dark:from-secondary-900 dark:to-secondary-800 px-4 py-8">
-      <div className="max-w-md w-full bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg">
-        <h2 className="text-3xl font-bold mb-6 text-center text-gray-900 dark:text-white">
+    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center bg-gradient-to-br from-primary-50 to-secondary dark:from-background dark:to-background px-4 py-16">
+      <div className="max-w-md w-full bg-card p-8 rounded-lg shadow-lg border border-border">
+        <h2 className="text-3xl font-bold mb-6 text-center text-foreground">
           Sign Up
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -68,7 +62,7 @@ export default function RegisterPage() {
               placeholder="Full Name"
               value={formData.fullName}
               onChange={handleChange}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 border border-input rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               required
             />
           </div>
@@ -77,7 +71,7 @@ export default function RegisterPage() {
               name="department"
               value={formData.department}
               onChange={handleChange}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               required
             >
               <option value="">Select Department</option>
@@ -95,7 +89,7 @@ export default function RegisterPage() {
               placeholder="FAST Email"
               value={formData.email}
               onChange={handleChange}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 border border-input rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               required
             />
           </div>
@@ -106,7 +100,7 @@ export default function RegisterPage() {
               placeholder="Password"
               value={formData.password}
               onChange={handleChange}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 border border-input rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               required
             />
           </div>
@@ -115,7 +109,7 @@ export default function RegisterPage() {
               name="gender"
               value={formData.gender}
               onChange={handleChange}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               required
             >
               <option value="">Select Gender</option>
@@ -137,11 +131,11 @@ export default function RegisterPage() {
           </Button>
         </form>
 
-        <p className="mt-6 text-sm text-center text-gray-600 dark:text-gray-300">
+        <p className="mt-6 text-sm text-center text-muted-foreground">
           Already have an account?{" "}
           <Link
             to="/login"
-            className="text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+            className="text-primary hover:underline font-semibold"
           >
             Sign In
           </Link>
@@ -150,7 +144,7 @@ export default function RegisterPage() {
         <p className="mt-4 text-sm text-center">
           <Link
             to="/"
-            className="text-gray-500 dark:text-gray-400 hover:underline"
+            className="text-muted-foreground hover:text-foreground hover:underline"
           >
             ← Back to Home
           </Link>

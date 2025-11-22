@@ -4,7 +4,7 @@ import axiosInstance from '../axiosInstance';
 // Async thunk: sign in
 export const signIn = createAsyncThunk("user/signIn", async (data, thunkAPI) => {
   try {
-    const response = await axiosInstance.post("/auth/login", data);
+    const response = await axiosInstance.post("/auth/signin", data);
     sessionStorage.setItem("token", response.data.token);
     sessionStorage.setItem("user", JSON.stringify(response.data.user));
     thunkAPI.dispatch(setUserDetails(response.data.user));
@@ -14,6 +14,22 @@ export const signIn = createAsyncThunk("user/signIn", async (data, thunkAPI) => 
     };
   } catch (err) {
     return thunkAPI.rejectWithValue(err.response?.data?.error || "Sign in failed");
+  }
+});
+
+// Async thunk: sign up
+export const signUp = createAsyncThunk("user/signUp", async (data, thunkAPI) => {
+  try {
+    const response = await axiosInstance.post("/auth/signup", data);
+    sessionStorage.setItem("token", response.data.token);
+    sessionStorage.setItem("user", JSON.stringify(response.data.user));
+    thunkAPI.dispatch(setUserDetails(response.data.user));
+    return {
+      token: response.data.token,
+      user: response.data.user
+    };
+  } catch (err) {
+    return thunkAPI.rejectWithValue(err.response?.data?.error || "Sign up failed");
   }
 });
 
@@ -81,6 +97,19 @@ const userSlice = createSlice({
         }
       })
       .addCase(fetchUserDetails.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+      // signUp
+      .addCase(signUp.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(signUp.fulfilled, (state, action) => {
+        state.loading = false;
+        state.userDetails = action.payload.user;
+      })
+      .addCase(signUp.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       });

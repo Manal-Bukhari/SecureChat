@@ -54,4 +54,3 @@ const checkConnection = () => {
 
 module.exports = connectDB;
 module.exports.isConnected = () => checkConnection();
-

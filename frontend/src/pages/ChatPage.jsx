@@ -141,7 +141,7 @@ export default function ChatPage() {
   return (
     <div>
       {!isConnected && (
-        <div className="bg-yellow-100 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-2 text-yellow-800 dark:text-yellow-200 flex items-center justify-between">
+        <div className="bg-warning/20 border border-warning/50 p-2 text-warning flex items-center justify-between">
           <span>Connection to messaging service lost.</span>
           <Button onClick={reconnect} variant="outline" size="sm" className="ml-2">
             Reconnect
