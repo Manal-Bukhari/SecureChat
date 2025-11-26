@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { Search, UserPlus, Loader2 } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
 import { toast } from 'react-hot-toast';
-import { searchGlobalUsers, sendFriendRequest, getFriendRequests, clearSearchResults } from '../../store/slices/chatSlice';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/Dialog';
+import { searchGlobalUsers, sendFriendRequest, getFriendRequests, clearSearchResults, addGroupMember } from '../../store/slices/chatSlice';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 
-export default function AddFriendDialog({ open, onOpenChange }) {
+export default function AddFriendDialog({ open, onOpenChange, onAddUser = null }) {
   const [searchQuery, setSearchQuery] = useState('');
   const dispatch = useDispatch();
   const { userDetails: user } = useSelector((state) => state.user);
@@ -34,6 +34,20 @@ export default function AddFriendDialog({ open, onOpenChange }) {
       return;
     }
 
+    // If custom handler provided (for group member adding), use it
+    if (onAddUser && typeof onAddUser === 'function') {
+      try {
+        await onAddUser(targetUser);
+        setSearchQuery('');
+        dispatch(clearSearchResults());
+        onOpenChange(false);
+      } catch (error) {
+        // Error is already handled in the handler
+      }
+      return;
+    }
+
+    // Default: send friend request
     try {
       await dispatch(sendFriendRequest(targetUser.id));
       dispatch(getFriendRequests());
@@ -63,6 +77,9 @@ export default function AddFriendDialog({ open, onOpenChange }) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add Friend</DialogTitle>
+          <DialogDescription>
+            Search for users by name or email to send a friend request.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="mb-4">

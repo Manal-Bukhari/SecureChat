@@ -142,12 +142,26 @@ exports.getFriends = async (req, res) => {
       }
     }
 
-    // Sort by last message timestamp (most recent first)
+    // Sort by last message timestamp (most recent first), but keep all friends visible
+    // Friends with messages come first, then friends without messages (sorted alphabetically)
     allFriends.sort((a, b) => {
-      if (!a.lastSeen && !b.lastSeen) return 0;
-      if (!a.lastSeen) return 1;
-      if (!b.lastSeen) return -1;
-      return new Date(b.lastSeen) - new Date(a.lastSeen);
+      const aHasMessage = a.lastMessage && a.lastMessage.trim() !== "";
+      const bHasMessage = b.lastMessage && b.lastMessage.trim() !== "";
+      
+      // If both have messages, sort by timestamp
+      if (aHasMessage && bHasMessage) {
+        if (!a.lastSeen && !b.lastSeen) return 0;
+        if (!a.lastSeen) return 1;
+        if (!b.lastSeen) return -1;
+        return new Date(b.lastSeen) - new Date(a.lastSeen);
+      }
+      
+      // If only one has messages, prioritize it
+      if (aHasMessage && !bHasMessage) return -1;
+      if (!aHasMessage && bHasMessage) return 1;
+      
+      // If neither has messages, sort alphabetically by name
+      return a.name.localeCompare(b.name);
     });
 
     return res.json(allFriends);

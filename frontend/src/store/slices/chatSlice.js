@@ -128,6 +128,119 @@ export const rejectFriendRequest = createAsyncThunk(
   }
 );
 
+// ========== GROUP CHAT THUNKS ==========
+
+// Create a new group
+export const createGroup = createAsyncThunk(
+  "chat/createGroup",
+  async (groupData, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post("/groups", groupData);
+      toast.success("Group created successfully");
+      return response.data.group;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to create group";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Get all groups
+export const fetchGroups = createAsyncThunk(
+  "chat/fetchGroups",
+  async (_, thunkAPI) => {
+    try {
+      const response = await axiosInstance.get("/groups");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to fetch groups";
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Add a friend to group
+export const addGroupMember = createAsyncThunk(
+  "chat/addGroupMember",
+  async ({ groupId, userId }, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/groups/${groupId}/members`, { userId });
+      toast.success("Member added to group");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to add member";
+      // Don't show error toast if it's about not being friends - we'll handle it by sending a group request
+      if (!message.includes('only add friends') && !message.includes('group request')) {
+        toast.error(message);
+      }
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Send group request to non-friend
+export const sendGroupRequest = createAsyncThunk(
+  "chat/sendGroupRequest",
+  async ({ groupId, userId }, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/groups/${groupId}/request/${userId}`);
+      toast.success("Group request sent");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to send group request";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Get group requests
+export const getGroupRequests = createAsyncThunk(
+  "chat/getGroupRequests",
+  async (_, thunkAPI) => {
+    try {
+      const response = await axiosInstance.get("/groups/requests/all");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to fetch group requests";
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Accept group request
+export const acceptGroupRequest = createAsyncThunk(
+  "chat/acceptGroupRequest",
+  async (requestId, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/groups/requests/${requestId}/accept`);
+      toast.success("Group request accepted");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to accept group request";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Reject group request
+export const rejectGroupRequest = createAsyncThunk(
+  "chat/rejectGroupRequest",
+  async (requestId, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/groups/requests/${requestId}/reject`);
+      toast.success("Group request rejected");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to reject group request";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
 // Add a user to your friends list (backward compatibility - now sends a request)
 export const addNewContact = createAsyncThunk(
   "chat/addNewContact",
@@ -154,16 +267,27 @@ const chatSlice = createSlice({
       received: [], // Friend requests received from others
       sent: [] // Friend requests sent to others
     },
+    groups: [], // User's groups
+    groupRequests: {
+      received: [], // Group requests received from others
+      sent: [] // Group requests sent to others
+    },
     selectedContact: null,
+    selectedGroup: null,
     isContactsLoading: false,
     isMessagesLoading: false,
     isSearching: false, // UI loading state for search
     isFriendRequestsLoading: false,
+    isGroupsLoading: false,
+    isGroupRequestsLoading: false,
     error: null,
   },
   reducers: {
     setSelectedContact: (state, action) => {
       state.selectedContact = action.payload;
+    },
+    setSelectedGroup: (state, action) => {
+      state.selectedGroup = action.payload;
     },
     clearChatState: (state) => {
       state.contacts = [];
@@ -293,9 +417,104 @@ const chatSlice = createSlice({
     .addCase(sendFriendRequest.fulfilled, (state, action) => {
       // Refresh friend requests to show the sent request
       // This will be handled by getFriendRequests if needed
+    })
+    // createGroup
+    .addCase(createGroup.pending, (state) => {
+      state.isGroupsLoading = true;
+    })
+    .addCase(createGroup.fulfilled, (state, action) => {
+      state.isGroupsLoading = false;
+      if (action.payload) {
+        // Add the new group to the groups array
+        const newGroup = {
+          id: action.payload.id,
+          name: action.payload.name,
+          description: action.payload.description,
+          createdBy: action.payload.createdBy,
+          members: action.payload.members,
+          memberCount: action.payload.members?.length || 0,
+          createdAt: action.payload.createdAt
+        };
+        state.groups.unshift(newGroup);
+      }
+    })
+    .addCase(createGroup.rejected, (state) => {
+      state.isGroupsLoading = false;
+    })
+    // fetchGroups
+    .addCase(fetchGroups.pending, (state) => {
+      state.isGroupsLoading = true;
+    })
+    .addCase(fetchGroups.fulfilled, (state, action) => {
+      state.isGroupsLoading = false;
+      state.groups = action.payload || [];
+    })
+    .addCase(fetchGroups.rejected, (state) => {
+      state.isGroupsLoading = false;
+    })
+    // addGroupMember
+    .addCase(addGroupMember.fulfilled, (state, action) => {
+      if (action.payload?.group) {
+        const groupIndex = state.groups.findIndex(g => g.id === action.payload.group.id);
+        if (groupIndex !== -1) {
+          state.groups[groupIndex] = {
+            ...action.payload.group,
+            memberCount: action.payload.group.members?.length || 0
+          };
+        }
+      }
+    })
+    // getGroupRequests
+    .addCase(getGroupRequests.pending, (state) => {
+      state.isGroupRequestsLoading = true;
+    })
+    .addCase(getGroupRequests.fulfilled, (state, action) => {
+      state.isGroupRequestsLoading = false;
+      state.groupRequests = action.payload || { received: [], sent: [] };
+    })
+    .addCase(getGroupRequests.rejected, (state) => {
+      state.isGroupRequestsLoading = false;
+    })
+    // acceptGroupRequest
+    .addCase(acceptGroupRequest.fulfilled, (state, action) => {
+      // Remove from received requests
+      state.groupRequests.received = state.groupRequests.received.filter(
+        req => req.requestId !== action.meta.arg
+      );
+      // Add group to groups list if not already there
+      if (action.payload?.group) {
+        const exists = state.groups.some(g => g.id === action.payload.group.id);
+        if (!exists) {
+          state.groups.unshift({
+            ...action.payload.group,
+            memberCount: action.payload.group.members?.length || 0
+          });
+        } else {
+          // Update existing group
+          const groupIndex = state.groups.findIndex(g => g.id === action.payload.group.id);
+          if (groupIndex !== -1) {
+            state.groups[groupIndex] = {
+              ...action.payload.group,
+              memberCount: action.payload.group.members?.length || 0
+            };
+          }
+        }
+      }
+    })
+    // rejectGroupRequest
+    .addCase(rejectGroupRequest.fulfilled, (state, action) => {
+      // Remove from received requests
+      state.groupRequests.received = state.groupRequests.received.filter(
+        req => req.requestId !== action.meta.arg
+      );
+    })
+    // sendGroupRequest
+    .addCase(sendGroupRequest.fulfilled, (state, action) => {
+      // Refresh group requests to show the sent request
+      // This will be handled by getGroupRequests if needed
     });
   },
 });
 
-export const { setSelectedContact, clearChatState, addMessage, clearSearchResults, updateMessage, markMessageFailed } = chatSlice.actions;
+export const { setSelectedContact, setSelectedGroup, clearChatState, addMessage, clearSearchResults, updateMessage, markMessageFailed } = chatSlice.actions;
 export default chatSlice.reducer;
