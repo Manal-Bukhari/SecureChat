@@ -27,12 +27,12 @@ function Layout() {
     }
   }, [dispatch, userDetails]);
 
-  // Only protect /chat route, allow home page without login
-  const isChatRoute = location.pathname === '/chat';
+  // Protect /chat and /settings routes, allow home page without login
+  const isProtectedRoute = location.pathname === '/chat' || location.pathname === '/settings';
   const isAuthenticated = sessionStorage.getItem("token") || userDetails;
 
-  // Redirect to login only if accessing chat without authentication
-  if (isChatRoute && !isAuthenticated) {
+  // Redirect to login only if accessing protected routes without authentication
+  if (isProtectedRoute && !isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X, User, Moon, Sun, MessageSquare, LogOut, Settings } from 'lucide-react';
+import { Menu, X, User, Moon, Sun, MessageSquare, LogOut, Settings, UserCheck } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import { useSelector, useDispatch } from 'react-redux';
 import { logout } from '../../store/slices/userSlice';
+import { getFriendRequests } from '../../store/slices/chatSlice';
 
 const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -12,8 +13,11 @@ const Navbar = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const dispatch = useDispatch();
   const { userDetails: user } = useSelector((state) => state.user);
+  const { friendRequests } = useSelector((state) => state.chat);
   const location = useLocation();
   const navigate = useNavigate();
+  
+  const pendingRequestsCount = friendRequests?.received?.length || 0;
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 10);
@@ -33,6 +37,8 @@ const Navbar = () => {
       setIsDarkMode(false);
     }
   }, []);
+
+  // Friend requests are loaded in ChatPage, no need to load here
 
   const toggleDarkMode = () => {
     if (isDarkMode) {
@@ -99,13 +105,18 @@ const Navbar = () => {
                 <Link
                   to="/chat"
                   className={cn(
-                    "text-sm font-medium transition-colors duration-200 hover:text-primary relative py-2 px-1",
+                    "text-sm font-medium transition-colors duration-200 hover:text-primary relative py-2 px-1 flex items-center gap-2",
                     location.pathname === "/chat"
                       ? "text-primary"
                       : "text-foreground/80 hover:text-foreground"
                   )}
                 >
                   Chat
+                  {pendingRequestsCount > 0 && (
+                    <span className="h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
+                      {pendingRequestsCount}
+                    </span>
+                  )}
                   {location.pathname === "/chat" && (
                     <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-primary rounded-full transform transition-transform duration-300"></span>
                   )}
@@ -143,13 +154,17 @@ const Navbar = () => {
               ) : (
                 <>
                   <span
-                    onClick={() => navigate('/profile')}
-                    className="text-sm font-semibold flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                    className="text-sm font-medium text-foreground"
                   >
-                    <User className="h-5 w-5" />
                     {user.fullName}
-                    <Settings className="h-5 w-5" />
                   </span>
+                  <button
+                    onClick={() => navigate('/settings')}
+                    className="p-2 rounded-full hover:bg-muted transition-colors"
+                    aria-label="Settings"
+                  >
+                    <Settings className="h-5 w-5" />
+                  </button>
                   <Button variant="destructive" size="sm" onClick={handleLogout}>
                     <LogOut className="mr-2 h-4 w-4" /> Logout
                   </Button>
@@ -236,12 +251,12 @@ const Navbar = () => {
                   <button
                     onClick={() => {
                       closeMobileMenu();
-                      navigate('/profile');
+                      navigate('/settings');
                     }}
                     className="text-sm font-semibold flex items-center gap-2 py-2 hover:text-primary transition-colors"
                   >
-                    <User className="h-5 w-5" />
-                    {user.fullName}
+                    <Settings className="h-5 w-5" />
+                    Settings
                   </button>
                   <Button 
                     variant="destructive" 

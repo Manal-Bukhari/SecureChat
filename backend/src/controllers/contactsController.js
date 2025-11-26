@@ -21,52 +21,14 @@ const getUserIdFromToken = (req) => {
 
 /**
  * GET /api/messages/contacts
- * Returns existing conversations.
+ * DEPRECATED: Now redirects to friends endpoint
+ * Kept for backward compatibility but uses friendController
  */
 exports.getContacts = async (req, res) => {
   try {
-    const currentUserId = getUserIdFromToken(req);
-    if (!currentUserId) return res.status(401).json({ error: "Not authenticated" });
-
-    // Check DB connection
-    if (!isConnected() && mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ error: "Database connection unavailable." });
-    }
-
-    const conversations = await Conversation.find({
-      participants: currentUserId
-    })
-      .sort({ lastMessageTimestamp: -1 })
-      .populate("participants", "fullName email gender department isOnline");
-
-    const contacts = await Promise.all(
-      conversations.map(async conv => {
-        const other = conv.participants.find(
-          p => p._id.toString() !== currentUserId
-        );
-        if (!other) return null;
-
-        const unreadCount = await Message.countDocuments({
-          conversationId: conv._id.toString(),
-          receiverId: currentUserId,
-          read: false
-        });
-
-        return {
-          id:           conv._id.toString(),
-          userId:       other._id.toString(),
-          name:         other.fullName,
-          email:        other.email,
-          department:   other.department,
-          isOnline:     other.isOnline || false,
-          lastMessage:  conv.lastMessage,
-          lastSeen:     conv.lastMessageTimestamp ? conv.lastMessageTimestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
-          unreadCount
-        };
-      })
-    );
-
-    return res.json(contacts.filter(c => c));
+    // Use friendController instead
+    const friendController = require("./friendController");
+    return friendController.getFriends(req, res);
   } catch (error) {
     console.error("Error fetching contacts:", error);
     return res.status(500).json({ error: "Failed to fetch contacts" });
@@ -113,52 +75,14 @@ exports.searchUsers = async (req, res) => {
 
 /**
  * POST /api/contacts/add
- * Adds a user to contacts (creates conversation) and returns the contact object.
+ * Adds a user to contacts (now uses Friend model)
+ * This endpoint is kept for backward compatibility but now uses friendController.addFriend
  */
 exports.addContact = async (req, res) => {
   try {
-    const currentUserId = getUserIdFromToken(req);
-    const { userId: targetUserId } = req.body;
-
-    if (!targetUserId) {
-      return res.status(400).json({ error: "User ID is required" });
-    }
-
-    // 1. Check if conversation already exists
-    let conversation = await Conversation.findOne({
-      participants: { $all: [currentUserId, targetUserId] }
-    });
-
-    // 2. If not, create it
-    if (!conversation) {
-      conversation = new Conversation({
-        participants: [currentUserId, targetUserId],
-        lastMessage: "",
-        lastMessageTimestamp: new Date()
-      });
-      await conversation.save();
-    }
-
-    // 3. Fetch target user details to construct the 'Contact' object
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    // 4. Return the structure matching getContacts
-    const newContact = {
-      id:           conversation._id.toString(),
-      userId:       targetUser._id.toString(),
-      name:         targetUser.fullName,
-      email:        targetUser.email,
-      department:   targetUser.department,
-      isOnline:     targetUser.isOnline || false,
-      lastMessage:  conversation.lastMessage || "",
-      lastSeen:     conversation.lastMessageTimestamp ? new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
-      unreadCount:  0 // New contact implies no unread messages initially
-    };
-
-    res.json(newContact);
+    // Import and use friendController
+    const friendController = require("./friendController");
+    return friendController.addFriend(req, res);
   } catch (error) {
     console.error("Error adding contact:", error);
     res.status(500).json({ error: "Failed to add contact" });

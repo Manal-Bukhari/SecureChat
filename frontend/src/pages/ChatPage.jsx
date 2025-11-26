@@ -5,14 +5,14 @@ import { useLocation } from 'react-router-dom';
 import ContactsSidebar from "../components/Chat/ContactsSidebar";
 import ChatArea from "../components/Chat/ChatArea";
 import EmptyChatState from "../components/Chat/EmptyChatState";
-import { fetchContacts, fetchMessages, sendMessage, setSelectedContact, addMessage } from '../store/slices/chatSlice';
+import { fetchContacts, fetchMessages, sendMessage, setSelectedContact, addMessage, getFriendRequests } from '../store/slices/chatSlice';
 import { Button } from '../components/ui/Button';
 
 export default function ChatPage() {
   const location = useLocation();
   const dispatch = useDispatch();
   const { socket, isConnected, connectError, reconnect } = useSocket();
-  const { contacts, messages, selectedContact, isContactsLoading, isMessagesLoading } = useSelector((state) => state.chat);
+  const { contacts, messages, selectedContact, isContactsLoading, isMessagesLoading, friendRequests } = useSelector((state) => state.chat);
   const { userDetails: user } = useSelector((state) => state.user);
   const [activeId, setActiveId] = useState(null);
   const [processedMessageIds, setProcessedMessageIds] = useState(new Set());
@@ -33,11 +33,15 @@ export default function ChatPage() {
     }
   }, [location.state, contacts, activeId, dispatch]);
 
-  // Load contacts using Redux
+  // Load contacts and friend requests using Redux on first mount
   useEffect(() => {
     if (!user) return;
+    
+    // Always fetch on first load of chat page
     dispatch(fetchContacts());
-  }, [user, dispatch]);
+    dispatch(getFriendRequests());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]); // Only depend on user to avoid infinite loops
 
   // Join room effect
   useEffect(() => {
@@ -166,9 +170,10 @@ export default function ChatPage() {
             connectError={connectError}
             handleSend={handleSend}
             currentUserId={user?.id}
+            isFriend={true} // Contacts list only shows accepted friends
           />
         ) : (
-          <EmptyChatState />
+          <EmptyChatState currentUserId={user?.id} />
         )}
       </div>
     </div>

@@ -1,48 +1,34 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Loader2 } from 'lucide-react';
+import { Search, MessageSquare, UserCheck, RefreshCw, UserPlus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { searchGlobalUsers, addNewContact, clearSearchResults } from '../../store/slices/chatSlice';
+import { fetchContacts, getFriendRequests } from '../../store/slices/chatSlice';
+import FriendRequests from './FriendRequests';
+import AddFriendDialog from './AddFriendDialog';
 
 export default function ContactsSidebar({ contacts, activeId, setActiveId }) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [isGlobalSearchMode, setIsGlobalSearchMode] = useState(false);
+  const [activeTab, setActiveTab] = useState('messages'); // 'messages' or 'requests'
+  const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Redux state for global search
-  const { searchResults, isSearching } = useSelector(state => state.chat);
+  // Redux state for friend requests
+  const { friendRequests, isFriendRequestsLoading, isContactsLoading } = useSelector(state => state.chat);
+  const { userDetails: user } = useSelector((state) => state.user);
+  
+  // Count of pending received requests for badge
+  const pendingRequestsCount = friendRequests?.received?.length || 0;
 
-  // 1. Local Filter Logic
-  const localFiltered = searchTerm && !isGlobalSearchMode
+  // Local Filter Logic - only filter existing contacts
+  const localFiltered = searchTerm
     ? contacts.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()))
     : contacts;
 
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
-    // If user clears input, reset to local mode
-    if (e.target.value === '') {
-      setIsGlobalSearchMode(false);
-      dispatch(clearSearchResults());
-    }
-  };
-
-  const handleGlobalSearch = () => {
-    if (!searchTerm.trim()) return;
-    setIsGlobalSearchMode(true);
-    dispatch(searchGlobalUsers(searchTerm));
-  };
-
-  const handleAddUser = async (user) => {
-    // Add user to contacts -> this triggers Redux to add to 'contacts' array
-    await dispatch(addNewContact(user.id));
-    // Reset search UI
-    setSearchTerm('');
-    setIsGlobalSearchMode(false);
-    // Navigate/Select is handled by the Redux extraReducer or effect in ChatPage
-    setActiveId(user.id);
   };
 
   const selectContact = (id) => {
@@ -53,83 +39,126 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId }) {
     });
   };
 
+  const handleRefreshRequests = () => {
+    if (user) {
+      dispatch(getFriendRequests());
+    }
+  };
+
+  const handleRefreshMessages = () => {
+    if (user) {
+      dispatch(fetchContacts());
+    }
+  };
+
+  const handleAddFriend = () => {
+    setIsAddFriendDialogOpen(true);
+  };
+
   return (
     <aside className="w-80 bg-card border-r border-border flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-border">
-        <h2 className="text-2xl font-semibold text-foreground mb-3">Messages</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-2xl font-semibold text-foreground m-0 leading-tight">Messages</h2>
+          {/* Action buttons */}
+          <div className="flex items-center gap-1">
+            {/* Add Friend button - show on both tabs */}
+            <button
+              onClick={handleAddFriend}
+              className="p-2 rounded-full hover:bg-muted transition-colors"
+              title="Add Friend"
+            >
+              <UserPlus className="h-4 w-4 text-muted-foreground" />
+            </button>
+            {/* Refresh button for both tabs */}
+            {activeTab === 'requests' ? (
+              <button
+                onClick={handleRefreshRequests}
+                className="p-2 rounded-full hover:bg-muted transition-colors"
+                title="Refresh requests"
+                disabled={isFriendRequestsLoading}
+              >
+                <RefreshCw className={cn("h-4 w-4 text-muted-foreground", isFriendRequestsLoading && "animate-spin")} />
+              </button>
+            ) : (
+              <button
+                onClick={handleRefreshMessages}
+                className="p-2 rounded-full hover:bg-muted transition-colors"
+                title="Refresh contacts"
+                disabled={isContactsLoading}
+              >
+                <RefreshCw className={cn("h-4 w-4 text-muted-foreground", isContactsLoading && "animate-spin")} />
+              </button>
+            )}
+          </div>
+        </div>
+        
+        {/* Tabs */}
+        <div className="flex gap-2 mb-3 border-b border-border">
+          <button
+            onClick={() => setActiveTab('messages')}
+            className={cn(
+              "flex-1 py-2 px-3 text-sm font-medium transition-colors relative",
+              activeTab === 'messages'
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              <span>Messages</span>
+            </div>
+            {activeTab === 'messages' && (
+              <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-primary rounded-full"></span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('requests')}
+            className={cn(
+              "flex-1 py-2 px-3 text-sm font-medium transition-colors relative",
+              activeTab === 'requests'
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <UserCheck className="h-4 w-4" />
+              <span>Requests</span>
+              {pendingRequestsCount > 0 && (
+                <span className="h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
+                  {pendingRequestsCount}
+                </span>
+              )}
+            </div>
+            {activeTab === 'requests' && (
+              <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-primary rounded-full"></span>
+            )}
+          </button>
+        </div>
+
+        {/* Search bar (shown for both tabs) */}
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search..."
+              placeholder={activeTab === 'messages' ? "Search contacts..." : "Search requests..."}
               className="w-full pl-10 pr-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring transition"
               value={searchTerm}
               onChange={handleSearchChange}
-              onKeyDown={(e) => e.key === 'Enter' && handleGlobalSearch()}
             />
           </div>
-          {/* Button to trigger Global Search explicitly */}
-          {searchTerm && !isGlobalSearchMode && (
-            <button 
-              onClick={handleGlobalSearch}
-              className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition"
-              title="Search Directory"
-            >
-              <UserPlus className="h-5 w-5" />
-            </button>
-          )}
         </div>
       </div>
 
       {/* List Area */}
       <div className="flex-1 overflow-y-auto divide-y divide-border py-2">
-        
-        {/* VIEW 1: Global Search Results */}
-        {isGlobalSearchMode ? (
-          <div className="px-2">
-            <div className="flex items-center justify-between px-2 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              <span>Directory Results</span>
-              <button 
-                onClick={() => setIsGlobalSearchMode(false)}
-                className="text-primary hover:underline cursor-pointer"
-              >
-                Back to Contacts
-              </button>
-            </div>
-
-            {isSearching ? (
-              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                <Loader2 className="h-6 w-6 animate-spin mb-2" />
-                <span className="text-sm">Searching users...</span>
-              </div>
-            ) : searchResults.length > 0 ? (
-              searchResults.map(user => (
-                <div key={user.id} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted rounded-lg transition-colors">
-                  <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center text-lg font-medium text-secondary-foreground">
-                    {user.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1 overflow-hidden">
-                    <p className="text-sm font-medium text-foreground truncate">{user.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{user.email || 'No status'}</p>
-                  </div>
-                  <button
-                    onClick={() => handleAddUser(user)}
-                    className="p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition shadow-sm"
-                  >
-                    <UserPlus className="h-4 w-4" />
-                  </button>
-                </div>
-              ))
-            ) : (
-              <div className="p-4 text-center text-muted-foreground text-sm">
-                No users found matching "{searchTerm}"
-              </div>
-            )}
-          </div>
+        {/* Friend Requests Tab */}
+        {activeTab === 'requests' ? (
+          <FriendRequests searchTerm={searchTerm} />
         ) : (
-          /* VIEW 2: Existing Contacts (Default) */
+          /* Existing Contacts (Default) */
           <>
             {localFiltered.length > 0 ? localFiltered.map(contact => (
               <button
@@ -160,20 +189,20 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId }) {
               </button>
             )) : (
               <div className="p-8 text-center">
-                <p className="text-muted-foreground mb-2">No contacts found.</p>
-                {searchTerm && (
-                  <button 
-                    onClick={handleGlobalSearch}
-                    className="text-primary text-sm font-medium hover:underline"
-                  >
-                    Search globally for "{searchTerm}"
-                  </button>
-                )}
+                <p className="text-muted-foreground">
+                  {searchTerm ? `No contacts found matching "${searchTerm}"` : "No contacts found."}
+                </p>
               </div>
             )}
           </>
         )}
       </div>
+
+      {/* Add Friend Dialog */}
+      <AddFriendDialog 
+        open={isAddFriendDialogOpen} 
+        onOpenChange={setIsAddFriendDialogOpen} 
+      />
     </aside>
   );
 }

@@ -7,7 +7,8 @@ export const fetchContacts = createAsyncThunk(
   "chat/fetchContacts",
   async (_, thunkAPI) => {
     try {
-      const response = await axiosInstance.get("/messages/contacts");
+      // Use the new friends endpoint
+      const response = await axiosInstance.get("/friends");
       return response.data;
     } catch (error) {
       const message = error.response?.data?.error || error.response?.data?.message || error.message;
@@ -25,7 +26,10 @@ export const fetchMessages = createAsyncThunk(
       return response.data;
     } catch (error) {
       const message = error.response?.data?.error || error.response?.data?.message || error.message;
-      toast.error(message);
+      // Only show toast for friendship-related errors, not for all errors
+      if (message.includes("friends") || message.includes("friend request")) {
+        toast.error(message);
+      }
       return thunkAPI.rejectWithValue(message);
     }
   }
@@ -42,6 +46,7 @@ export const sendMessage = createAsyncThunk(
       return response.data;
     } catch (error) {
       const message = error.response?.data?.error || error.response?.data?.message || error.message;
+      // Show toast for all send message errors (including friendship errors)
       toast.error(message);
       return thunkAPI.rejectWithValue(message);
     }
@@ -61,18 +66,79 @@ export const searchGlobalUsers = createAsyncThunk(
   }
 );
 
-// NEW: Add a user to your contact list (simulated "Request Accepted")
+// Send a friend request
+export const sendFriendRequest = createAsyncThunk(
+  "chat/sendFriendRequest",
+  async (userId, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/friends/request`, { userId }); 
+      toast.success("Friend request sent");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to send friend request";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Get friend requests
+export const getFriendRequests = createAsyncThunk(
+  "chat/getFriendRequests",
+  async (_, thunkAPI) => {
+    try {
+      const response = await axiosInstance.get(`/friends/requests`);
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to fetch friend requests";
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Accept a friend request
+export const acceptFriendRequest = createAsyncThunk(
+  "chat/acceptFriendRequest",
+  async (requestId, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/friends/accept/${requestId}`);
+      toast.success("Friend request accepted");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to accept friend request";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Reject a friend request
+export const rejectFriendRequest = createAsyncThunk(
+  "chat/rejectFriendRequest",
+  async (requestId, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/friends/reject/${requestId}`);
+      toast.success("Friend request rejected");
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to reject friend request";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Add a user to your friends list (backward compatibility - now sends a request)
 export const addNewContact = createAsyncThunk(
   "chat/addNewContact",
   async (userId, thunkAPI) => {
     try {
-      // Assuming backend route: POST /api/contacts/add { userId }
-      // This endpoint should create a conversation entry in DB if it doesn't exist
-      const response = await axiosInstance.post(`/contacts/add`, { userId }); 
-      return response.data; // Should return the new contact object
+      // Use the friend request endpoint
+      return thunkAPI.dispatch(sendFriendRequest(userId));
     } catch (error) {
-      toast.error("Failed to add contact");
-      return thunkAPI.rejectWithValue(error.message);
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to add friend";
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
     }
   }
 );
@@ -84,10 +150,15 @@ const chatSlice = createSlice({
     contacts: [],
     messages: [],
     searchResults: [], // Store global search results here
+    friendRequests: {
+      received: [], // Friend requests received from others
+      sent: [] // Friend requests sent to others
+    },
     selectedContact: null,
     isContactsLoading: false,
     isMessagesLoading: false,
     isSearching: false, // UI loading state for search
+    isFriendRequestsLoading: false,
     error: null,
   },
   reducers: {
@@ -105,6 +176,27 @@ const chatSlice = createSlice({
     // Clear search results when closing the search view
     clearSearchResults: (state) => {
       state.searchResults = [];
+    },
+    // Clear friend requests
+    clearFriendRequests: (state) => {
+      state.friendRequests = { received: [], sent: [] };
+    },
+    // Update a message (for pending messages)
+    updateMessage: (state, action) => {
+      const { tempId, message } = action.payload;
+      const index = state.messages.findIndex(msg => msg.id === tempId);
+      if (index !== -1) {
+        state.messages[index] = message;
+      }
+    },
+    // Mark a message as failed
+    markMessageFailed: (state, action) => {
+      const tempId = action.payload;
+      const message = state.messages.find(msg => msg.id === tempId);
+      if (message) {
+        message.pending = false;
+        message.failed = true;
+      }
     }
   },
   extraReducers: (builder) => {
@@ -160,9 +252,50 @@ const chatSlice = createSlice({
       state.contacts.unshift(action.payload);
       state.selectedContact = action.payload; // Auto-select them
       state.searchResults = []; // Clear search
+    })
+    // getFriendRequests
+    .addCase(getFriendRequests.pending, (state) => {
+      state.isFriendRequestsLoading = true;
+      state.error = null;
+    })
+    .addCase(getFriendRequests.fulfilled, (state, action) => {
+      state.isFriendRequestsLoading = false;
+      state.friendRequests = action.payload || { received: [], sent: [] };
+    })
+    .addCase(getFriendRequests.rejected, (state, action) => {
+      state.isFriendRequestsLoading = false;
+      state.error = action.payload;
+    })
+    // acceptFriendRequest
+    .addCase(acceptFriendRequest.fulfilled, (state, action) => {
+      // Remove from received requests
+      state.friendRequests.received = state.friendRequests.received.filter(
+        req => req.requestId !== action.meta.arg
+      );
+      // Add to contacts if contact object is returned
+      if (action.payload.contact) {
+        // Check if contact already exists to avoid duplicates
+        const exists = state.contacts.some(c => c.userId === action.payload.contact.userId);
+        if (!exists) {
+          state.contacts.unshift(action.payload.contact);
+        }
+        state.selectedContact = action.payload.contact;
+      }
+    })
+    // rejectFriendRequest
+    .addCase(rejectFriendRequest.fulfilled, (state, action) => {
+      // Remove from received requests
+      state.friendRequests.received = state.friendRequests.received.filter(
+        req => req.requestId !== action.meta.arg
+      );
+    })
+    // sendFriendRequest
+    .addCase(sendFriendRequest.fulfilled, (state, action) => {
+      // Refresh friend requests to show the sent request
+      // This will be handled by getFriendRequests if needed
     });
   },
 });
 
-export const { setSelectedContact, clearChatState, addMessage, clearSearchResults } = chatSlice.actions;
+export const { setSelectedContact, clearChatState, addMessage, clearSearchResults, updateMessage, markMessageFailed } = chatSlice.actions;
 export default chatSlice.reducer;

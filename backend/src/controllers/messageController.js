@@ -1,5 +1,6 @@
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
+const Friend = require('../models/Friend');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
@@ -41,6 +42,26 @@ exports.getMessages = async (req, res) => {
     
     if (!isParticipant) {
       return res.status(403).json({ error: 'Not authorized to access this conversation' });
+    }
+
+    // Check if users are friends (status: "accepted") before allowing message access
+    const otherParticipant = conversation.participants.find(
+      p => p.toString() !== currentUserId.toString()
+    );
+    
+    if (otherParticipant) {
+      const friendship = await Friend.findOne({
+        $or: [
+          { userId: currentUserId, friendId: otherParticipant.toString(), status: "accepted" },
+          { userId: otherParticipant.toString(), friendId: currentUserId, status: "accepted" }
+        ]
+      });
+      
+      if (!friendship) {
+        return res.status(403).json({ 
+          error: 'You must be friends to view messages. Please accept the friend request first.' 
+        });
+      }
     }
 
     // Get messages - Important: Use the ObjectID, not the string version
@@ -121,6 +142,22 @@ exports.postMessage = async (req, res) => {
     const receiverId = conversation.participants.find(
       p => p.toString() !== currentUserId.toString()
     );
+
+    // Check if users are friends (status: "accepted") before allowing messages
+    if (receiverId) {
+      const friendship = await Friend.findOne({
+        $or: [
+          { userId: currentUserId, friendId: receiverId.toString(), status: "accepted" },
+          { userId: receiverId.toString(), friendId: currentUserId, status: "accepted" }
+        ]
+      });
+      
+      if (!friendship) {
+        return res.status(403).json({ 
+          error: 'You must be friends to send messages. Please accept the friend request first.' 
+        });
+      }
+    }
 
     // Create new message with the proper ObjectID conversion
     const newMessage = new Message({

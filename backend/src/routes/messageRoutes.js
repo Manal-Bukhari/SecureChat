@@ -10,7 +10,8 @@ const authMiddleware = require('../middleware/authMiddleware');
 // Search users globally (e.g., /api/users/search?query=Ali)
 router.get('/users/search', authMiddleware, contactsController.searchUsers);
 
-// Add a user to contacts (e.g., POST /api/contacts/add)
+// DEPRECATED: Add a user to contacts - now use /api/friends/add instead
+// Kept for backward compatibility
 router.post('/contacts/add', authMiddleware, contactsController.addContact);
 
 
