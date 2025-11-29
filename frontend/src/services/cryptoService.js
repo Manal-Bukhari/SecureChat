@@ -9,7 +9,14 @@
 class CryptoService {
   constructor() {
     this.keyPair = null;
-    this.sharedKeys = new Map(); // Map of userId -> derived encryption key
+    this.sharedKeys = new Map(); // Map of userId -> { key: CryptoKey, publicKey: string }
+  }
+
+  /**
+   * Check if crypto is initialized
+   */
+  isInitialized() {
+    return this.keyPair !== null && this.keyPair.publicKey !== null;
   }
 
   /**
@@ -40,7 +47,7 @@ class CryptoService {
    * Export public key to base64 for sharing with other users
    */
   async exportPublicKey() {
-    if (!this.keyPair) {
+    if (!this.keyPair || !this.keyPair.publicKey) {
       throw new Error('Crypto not initialized. Call initialize() first.');
     }
 
@@ -49,7 +56,6 @@ class CryptoService {
         'raw',
         this.keyPair.publicKey
       );
-      
       return this.arrayBufferToBase64(exported);
     } catch (error) {
       console.error('Failed to export public key:', error);
@@ -60,11 +66,10 @@ class CryptoService {
   /**
    * Import another user's public key from base64
    */
-  async importPublicKey(publicKeyBase64) {
+  async importPublicKey(base64PublicKey) {
     try {
-      const keyData = this.base64ToArrayBuffer(publicKeyBase64);
-      
-      const importedKey = await window.crypto.subtle.importKey(
+      const keyData = this.base64ToArrayBuffer(base64PublicKey);
+      return await window.crypto.subtle.importKey(
         'raw',
         keyData,
         {
@@ -72,10 +77,8 @@ class CryptoService {
           namedCurve: 'P-256',
         },
         true,
-        []
+        [] // public keys don't need usage permissions
       );
-
-      return importedKey;
     } catch (error) {
       console.error('Failed to import public key:', error);
       throw error;
@@ -83,23 +86,30 @@ class CryptoService {
   }
 
   /**
-   * Derive a shared AES-GCM key with another user
-   * Uses ECDH to compute shared secret, then derives AES key
+   * Derive shared secret key from other user's public key
    */
   async deriveSharedKey(otherUserPublicKeyBase64, userId) {
     if (!this.keyPair) {
       throw new Error('Crypto not initialized');
     }
 
-    // Check if we already have this key cached
+    // Check if we already have this key cached WITH validation
     if (this.sharedKeys.has(userId)) {
-      return this.sharedKeys.get(userId);
+      const cached = this.sharedKeys.get(userId);
+      
+      // CRITICAL: Validate cached key matches current public key
+      if (cached.publicKey === otherUserPublicKeyBase64) {
+        console.log(`✅ Using cached shared key for user: ${userId}`);
+        return cached.key;
+      } else {
+        console.warn(`⚠️ Public key mismatch for user ${userId}! Clearing cache.`);
+        this.sharedKeys.delete(userId);
+      }
     }
 
     try {
-      // Import the other user's public key
       const otherPublicKey = await this.importPublicKey(otherUserPublicKeyBase64);
-
+      
       // Derive shared secret using ECDH
       const sharedSecret = await window.crypto.subtle.deriveBits(
         {
@@ -110,21 +120,22 @@ class CryptoService {
         256 // 256 bits for AES-256
       );
 
-      // Derive AES-GCM key from shared secret
+      // Import the shared secret as an AES-GCM key
       const sharedKey = await window.crypto.subtle.importKey(
         'raw',
         sharedSecret,
-        {
-          name: 'AES-GCM',
-        },
-        false, // not extractable for security
+        { name: 'AES-GCM' },
+        false, // not extractable
         ['encrypt', 'decrypt']
       );
 
-      // Cache the derived key
-      this.sharedKeys.set(userId, sharedKey);
+      // Cache with public key for validation
+      this.sharedKeys.set(userId, {
+        key: sharedKey,
+        publicKey: otherUserPublicKeyBase64
+      });
+      
       console.log(`🔑 Derived shared key for user: ${userId}`);
-
       return sharedKey;
     } catch (error) {
       console.error('Failed to derive shared key:', error);
@@ -168,7 +179,7 @@ class CryptoService {
       };
     } catch (error) {
       console.error('Encryption failed:', error);
-      throw error;
+      throw new Error('Failed to encrypt message');
     }
   }
 
@@ -207,7 +218,7 @@ class CryptoService {
       const decoder = new TextDecoder();
       return decoder.decode(plaintextBuffer);
     } catch (error) {
-      console.error('Decryption failed:', error);
+      console.error(' Decryption failed:', error);
       throw new Error('Failed to decrypt message. Message may be corrupted or key mismatch.');
     }
   }
@@ -222,12 +233,26 @@ class CryptoService {
   }
 
   /**
-   * Decrypt message from a specific user
+   * Decrypt message from a specific user WITH RETRY
    * Convenience method that handles key derivation
    */
   async decryptFromUser(encryptedData, otherUserPublicKey, userId) {
-    const sharedKey = await this.deriveSharedKey(otherUserPublicKey, userId);
-    return await this.decryptMessage(encryptedData, sharedKey);
+    try {
+      const sharedKey = await this.deriveSharedKey(otherUserPublicKey, userId);
+      return await this.decryptMessage(encryptedData, sharedKey);
+    } catch (error) {
+      // If decryption fails, clear cache and retry ONCE
+      console.warn(`⚠️ Initial decryption failed for user ${userId}. Clearing cache and retrying.`);
+      this.sharedKeys.delete(userId);
+      
+      try {
+        const retryKey = await this.deriveSharedKey(otherUserPublicKey, userId);
+        return await this.decryptMessage(encryptedData, retryKey);
+      } catch (retryError) {
+        console.error(`❌ Retry decryption failed for user ${userId}:`, retryError);
+        throw retryError;
+      }
+    }
   }
 
   /**
@@ -236,11 +261,11 @@ class CryptoService {
   clearKeys() {
     this.sharedKeys.clear();
     this.keyPair = null;
-    console.log('🔒 Crypto keys cleared');
+    console.log('🗑️  Crypto keys cleared');
   }
 
   /**
-   * Utility: ArrayBuffer to Base64
+   * Helper: Convert ArrayBuffer to Base64
    */
   arrayBufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
@@ -248,14 +273,14 @@ class CryptoService {
     for (let i = 0; i < bytes.byteLength; i++) {
       binary += String.fromCharCode(bytes[i]);
     }
-    return window.btoa(binary);
+    return btoa(binary);
   }
 
   /**
-   * Utility: Base64 to ArrayBuffer
+   * Helper: Convert Base64 to ArrayBuffer
    */
   base64ToArrayBuffer(base64) {
-    const binary = window.atob(base64);
+    const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
@@ -264,44 +289,57 @@ class CryptoService {
   }
 
   /**
-   * Check if crypto is initialized
+   * Save keys to localStorage
    */
-  isInitialized() {
-    return this.keyPair !== null;
-  }
+  async saveKeys(userId) {
+    if (!this.keyPair) {
+      console.warn('⚠️ No keys to save');
+      return false;
+    }
 
-  /**
-   * Save private key to localStorage (encrypted with password in production)
-   * WARNING: This is simplified. In production, encrypt with user password
-   */
-  async savePrivateKey(userId) {
     try {
-      const exported = await window.crypto.subtle.exportKey(
+      // Export private key
+      const privateKeyData = await window.crypto.subtle.exportKey(
         'pkcs8',
         this.keyPair.privateKey
       );
-      const base64 = this.arrayBufferToBase64(exported);
-      localStorage.setItem(`privateKey_${userId}`, base64);
-      console.log('🔐 Private key saved to localStorage');
+      
+      // Export public key
+      const publicKeyData = await window.crypto.subtle.exportKey(
+        'raw',
+        this.keyPair.publicKey
+      );
+
+      // Save both to localStorage
+      localStorage.setItem(`privateKey_${userId}`, this.arrayBufferToBase64(privateKeyData));
+      localStorage.setItem(`publicKey_${userId}`, this.arrayBufferToBase64(publicKeyData));
+      
+      console.log('💾 Keys saved to localStorage');
+      return true;
     } catch (error) {
-      console.error('Failed to save private key:', error);
+      console.error('Failed to save keys:', error);
+      return false;
     }
   }
 
   /**
-   * Load private key from localStorage
+   * Load keys from localStorage
    */
-  async loadPrivateKey(userId) {
+  async loadKeys(userId) {
     try {
-      const base64 = localStorage.getItem(`privateKey_${userId}`);
-      if (!base64) {
+      const privateKeyBase64 = localStorage.getItem(`privateKey_${userId}`);
+      const publicKeyBase64 = localStorage.getItem(`publicKey_${userId}`);
+
+      if (!privateKeyBase64 || !publicKeyBase64) {
+        console.log('📭 No saved keys found');
         return false;
       }
 
-      const keyData = this.base64ToArrayBuffer(base64);
+      // Import private key
+      const privateKeyData = this.base64ToArrayBuffer(privateKeyBase64);
       const privateKey = await window.crypto.subtle.importKey(
         'pkcs8',
-        keyData,
+        privateKeyData,
         {
           name: 'ECDH',
           namedCurve: 'P-256',
@@ -310,13 +348,24 @@ class CryptoService {
         ['deriveKey', 'deriveBits']
       );
 
-      // Also need to reconstruct the public key
-      // In production, store this separately or derive from private key
-      this.keyPair = { privateKey, publicKey: null };
-      console.log('🔐 Private key loaded from localStorage');
+      // Import public key
+      const publicKeyData = this.base64ToArrayBuffer(publicKeyBase64);
+      const publicKey = await window.crypto.subtle.importKey(
+        'raw',
+        publicKeyData,
+        {
+          name: 'ECDH',
+          namedCurve: 'P-256',
+        },
+        true,
+        []
+      );
+
+      this.keyPair = { privateKey, publicKey };
+      console.log('♻️ Keys loaded from localStorage');
       return true;
     } catch (error) {
-      console.error('Failed to load private key:', error);
+      console.error('Failed to load keys:', error);
       return false;
     }
   }

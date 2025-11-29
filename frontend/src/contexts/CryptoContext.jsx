@@ -5,192 +5,208 @@ import { useSelector } from 'react-redux';
 
 const CryptoContext = createContext();
 
-/**
- * Crypto Context Provider
- * Manages E2EE initialization and key management across the app
- */
 export const CryptoProvider = ({ children }) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [publicKey, setPublicKey] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
   const { userDetails: user } = useSelector((state) => state.user);
-  const initializationAttempted = useRef(false); // Track if we've tried to initialize
+  
+  // CRITICAL: Cache public keys to prevent version mismatches
+  const publicKeyCache = useRef({});
+  const initializationInProgress = useRef(false);
 
-  /**
-   * Initialize crypto service when user logs in
-   */
-  const initializeCrypto = useCallback(async (forceReinit = false) => {
-    if (isInitialized && !forceReinit) {
+  const initializeCrypto = useCallback(async () => {
+    // Fast exit if already initialized
+    if (isInitialized) {
+      console.log('✅ Crypto already initialized');
       return true;
+    }
+    
+    // Check if service is already ready
+    if (cryptoService.isInitialized()) {
+       console.log('⚡ Crypto service already ready');
+       setIsInitialized(true);
+       try {
+           const pubKey = await cryptoService.exportPublicKey();
+           setPublicKey(pubKey);
+       } catch (e) { 
+         console.error("Could not export existing key", e); 
+       }
+       return true;
     }
 
     if (!user?.id) {
-      console.log('⏳ Waiting for user to be logged in...');
+      console.log('⏸️ No user ID, skipping crypto init');
       return false;
     }
 
+    // Prevent overlapping calls
+    if (initializationInProgress.current) {
+      console.log('⏸️ Initialization already in progress');
+      return false;
+    }
+    
+    initializationInProgress.current = true;
     setIsLoading(true);
-    setError(null);
 
     try {
-      console.log('🔐 Initializing E2EE...');
+      console.log('🔧 Initializing crypto for user:', user.id);
       
-      // Try to load existing private key
-      const loaded = await cryptoService.loadPrivateKey(user.id);
+      // Try to load existing keys
+      const loaded = await cryptoService.loadKeys(user.id);
       
       if (!loaded) {
-        // Generate new key pair
+        console.log('🆕 No local keys found, generating new key pair...');
         await cryptoService.initialize();
-        
-        // Export and save public key
         const pubKey = await cryptoService.exportPublicKey();
-        setPublicKey(pubKey);
         
         // Upload public key to server
         await axiosInstance.put('/users/public-key', { publicKey: pubKey });
         
-        // Save private key locally
-        await cryptoService.savePrivateKey(user.id);
+        // Save keys locally
+        await cryptoService.saveKeys(user.id);
         
+        setPublicKey(pubKey);
         console.log('✅ New key pair generated and uploaded');
       } else {
-        // Load public key from server
+        console.log('♻️ Loaded existing keys from localStorage');
+        const pubKey = await cryptoService.exportPublicKey();
+        setPublicKey(pubKey);
+        
+        // Verify server has this key
         try {
           const response = await axiosInstance.get(`/users/${user.id}/public-key`);
-          setPublicKey(response.data.publicKey);
-          console.log('✅ Existing keys loaded');
-        } catch (err) {
-          // If public key not on server, regenerate
-          if (err.response?.status === 404) {
-            console.log('⚠️ Public key not found on server, regenerating...');
-            await cryptoService.initialize();
-            const pubKey = await cryptoService.exportPublicKey();
-            setPublicKey(pubKey);
+          if (!response.data.publicKey) {
+            console.log('📤 Uploading public key to server');
             await axiosInstance.put('/users/public-key', { publicKey: pubKey });
-            await cryptoService.savePrivateKey(user.id);
-          } else {
-            throw err;
+          }
+        } catch (err) {
+          if (err.response?.status === 404) {
+            console.log('📤 Uploading public key to server (404)');
+            await axiosInstance.put('/users/public-key', { publicKey: pubKey });
           }
         }
       }
 
       setIsInitialized(true);
+      console.log('✅ Crypto initialized successfully');
       return true;
-    } catch (err) {
-      console.error('Failed to initialize crypto:', err);
-      setError(err.message || 'Encryption initialization failed');
+    } catch (error) {
+      console.error('❌ Crypto initialization failed:', error);
+      setIsInitialized(false);
       return false;
     } finally {
+      initializationInProgress.current = false;
       setIsLoading(false);
     }
   }, [user, isInitialized]);
 
-  /**
-   * Get another user's public key
-   */
+  // CRITICAL: Cache public keys to prevent mismatches
   const getUserPublicKey = useCallback(async (userId) => {
+    // Check cache first
+    if (publicKeyCache.current[userId]) {
+      console.log(`📦 Using cached public key for user: ${userId}`);
+      return publicKeyCache.current[userId];
+    }
+    
     try {
-      const response = await axiosInstance.get(`/users/${userId}/public-key`);
-      return response.data.publicKey;
+      // Fetch fresh key
+      const response = await axiosInstance.get(`/users/${userId}/public-key?t=${Date.now()}`);
+      const publicKey = response.data.publicKey;
+      
+      if (!publicKey) {
+        throw new Error('Public key not found');
+      }
+      
+      // Cache it
+      publicKeyCache.current[userId] = publicKey;
+      console.log(`🔑 Fetched and cached public key for user: ${userId}`);
+      
+      return publicKey;
     } catch (err) {
-      console.error(`Failed to get public key for user ${userId}:`, err);
+      console.error(`❌ Failed to get public key for user ${userId}:`, err);
       throw new Error('User has not set up encryption yet');
     }
   }, []);
-
-  /**
-   * Encrypt a message for a specific user
-   */
-  const encryptMessage = useCallback(async (plaintext, recipientId) => {
-    if (!isInitialized) {
-      throw new Error('Crypto not initialized');
-    }
-
-    try {
-      const recipientPublicKey = await getUserPublicKey(recipientId);
-      const encrypted = await cryptoService.encryptForUser(
-        plaintext,
-        recipientPublicKey,
-        recipientId
-      );
-      return encrypted;
-    } catch (err) {
-      console.error('Encryption failed:', err);
-      throw err;
-    }
-  }, [isInitialized, getUserPublicKey]);
-
-  /**
-   * Decrypt a message from a specific user
-   */
-  const decryptMessage = useCallback(async (encryptedData, senderId) => {
-    if (!isInitialized) {
-      throw new Error('Crypto not initialized');
-    }
-
-    try {
-      const senderPublicKey = await getUserPublicKey(senderId);
-      const decrypted = await cryptoService.decryptFromUser(
-        encryptedData,
-        senderPublicKey,
-        senderId
-      );
-      return decrypted;
-    } catch (err) {
-      console.error('Decryption failed:', err);
-      // Return error message instead of throwing
-      return '[Decryption failed: Message may be corrupted]';
-    }
-  }, [isInitialized, getUserPublicKey]);
-
-  /**
-   * Clear crypto keys (on logout)
-   */
-  const clearCrypto = useCallback(() => {
-    cryptoService.clearKeys();
-    setIsInitialized(false);
-    setPublicKey(null);
-    setError(null);
-    initializationAttempted.current = false; // Reset initialization flag
-    console.log('🔒 Crypto cleared');
+  
+  // Clear public key cache
+  const clearPublicKeyCache = useCallback(() => {
+    publicKeyCache.current = {};
+    console.log('🗑️ Public key cache cleared');
   }, []);
 
-  // Auto-initialize when user logs in (only once per user session)
-  useEffect(() => {
-    if (user?.id && !isInitialized && !isLoading && !initializationAttempted.current) {
-      initializationAttempted.current = true;
-      initializeCrypto();
+  const encryptMessage = useCallback(async (plaintext, recipientId) => {
+    if (!isInitialized) {
+        console.log('⏸️ Crypto not initialized, initializing now...');
+        const success = await initializeCrypto();
+        if (!success) {
+          throw new Error('Crypto initialization failed');
+        }
     }
     
-    // Reset initialization flag when user changes
-    if (!user?.id) {
-      initializationAttempted.current = false;
+    try {
+      const recipientKey = await getUserPublicKey(recipientId);
+      const encrypted = await cryptoService.encryptForUser(plaintext, recipientKey, recipientId);
+      return encrypted;
+    } catch (err) {
+      console.error('❌ Encryption failed:', err);
+      throw err;
     }
-  }, [user?.id, isInitialized, isLoading]); // Removed initializeCrypto from dependencies
+  }, [isInitialized, getUserPublicKey, initializeCrypto]);
 
-  const value = {
-    isInitialized,
-    publicKey,
-    isLoading,
-    error,
-    initializeCrypto,
-    getUserPublicKey,
-    encryptMessage,
-    decryptMessage,
-    clearCrypto,
-  };
+  const decryptMessage = useCallback(async (encryptedData, senderId) => {
+    if (!isInitialized) {
+      console.log('⏸️ Crypto not initialized for decryption');
+      const success = await initializeCrypto();
+      if (!success) {
+        console.warn('⚠️ Crypto not initialized, cannot decrypt');
+        throw new Error('Encryption not initialized');
+      }
+    }
+    
+    try {
+      const senderKey = await getUserPublicKey(senderId);
+      const decrypted = await cryptoService.decryptFromUser(encryptedData, senderKey, senderId);
+      return decrypted;
+    } catch (err) {
+      console.error('❌ Decryption failed:', err);
+      throw err;
+    }
+  }, [isInitialized, getUserPublicKey, initializeCrypto]);
+
+  const clearCrypto = useCallback(() => {
+    cryptoService.clearKeys();
+    clearPublicKeyCache();
+    setIsInitialized(false);
+    setPublicKey(null);
+    initializationInProgress.current = false;
+    console.log('🗑️ Crypto cleared');
+  }, [clearPublicKeyCache]);
+
+  // Auto-initialize when user logs in
+  useEffect(() => {
+    if (user?.id && !isInitialized && !initializationInProgress.current) {
+      console.log('🚀 Auto-initializing crypto...');
+      initializeCrypto();
+    }
+  }, [user?.id, isInitialized, initializeCrypto]);
 
   return (
-    <CryptoContext.Provider value={value}>
+    <CryptoContext.Provider value={{
+      encryptMessage,
+      decryptMessage,
+      isInitialized,
+      publicKey,
+      isLoading,
+      clearCrypto,
+      initializeCrypto,
+      clearPublicKeyCache
+    }}>
       {children}
     </CryptoContext.Provider>
   );
 };
 
-/**
- * Hook to use crypto context
- */
 export const useCrypto = () => {
   const context = useContext(CryptoContext);
   if (!context) {
