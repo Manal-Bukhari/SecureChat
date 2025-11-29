@@ -11,6 +11,7 @@ const authRoutes = require("./src/routes/authRoutes");
 const messageRoutes = require("./src/routes/messageRoutes");
 const friendRoutes = require("./src/routes/friendRoutes");
 const groupRoutes = require("./src/routes/groupRoutes");
+const callRoutes = require("./src/routes/callRoutes");
 
 dotenv.config();
 connectDB();
@@ -57,6 +58,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api", messageRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/groups", groupRoutes);
+app.use("/api/calls", callRoutes);
 
 app.get("/", (req, res) => {
   res.send("SecureChat API is running");

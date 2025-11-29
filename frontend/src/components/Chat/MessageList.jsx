@@ -136,21 +136,21 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
   const isMine = message.senderId === currentUserId || message.senderId === 'me';
   const messageRef = useRef(null);
   
-  // Debug: Log message read status for sent messages
-  if (isMine && !message.pending && !message.failed) {
-    console.log('Message read status:', {
-      id: message.id,
-      read: message.read,
-      readType: typeof message.read,
-      pending: message.pending,
-      failed: message.failed,
-      isMine: isMine,
-      senderId: message.senderId,
-      currentUserId: currentUserId,
-      shouldShowTick: isMine && !message.pending && !message.failed,
-      shouldShowDoubleTick: message.read === true
-    });
-  }
+  // // Debug: Log message read status for sent messages
+  // if (isMine && !message.pending && !message.failed) {
+  //   console.log('Message read status:', {
+  //     id: message.id,
+  //     read: message.read,
+  //     readType: typeof message.read,
+  //     pending: message.pending,
+  //     failed: message.failed,
+  //     isMine: isMine,
+  //     senderId: message.senderId,
+  //     currentUserId: currentUserId,
+  //     shouldShowTick: isMine && !message.pending && !message.failed,
+  //     shouldShowDoubleTick: message.read === true
+  //   });
+  // }
   
   // Get sender name
   const senderName = message.senderName || (isMine ? (currentUserName || 'You') : (activeContact?.name || activeContact?.fullName || 'Unknown'));
@@ -393,16 +393,16 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
                 {(() => {
                   // Check read status - handle both boolean true and string 'true'
                   const isRead = message.read === true || message.read === 'true' || message.read === 1;
-                  if (isMine) {
-                    console.log('Rendering tick for message:', {
-                      id: message.id,
-                      read: message.read,
-                      readType: typeof message.read,
-                      isRead: isRead,
-                      willShowDoubleTick: isRead
-                    });
-                  }
-                  return isRead ? (
+                  // if (isMine) {
+                  //   console.log('Rendering tick for message:', {
+                  //     id: message.id,
+                  //     read: message.read,
+                  //     readType: typeof message.read,
+                  //     isRead: isRead,
+                  //     willShowDoubleTick: isRead
+                  //   });
+                  // }
+                 return isRead ? (
                     <CheckCheck className="h-3.5 w-3.5" style={{ color: '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
                   ) : (
                     <Check className="h-3.5 w-3.5" style={{ display: 'inline-block', flexShrink: 0 }} />

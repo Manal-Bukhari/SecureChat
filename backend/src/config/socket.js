@@ -1,5 +1,6 @@
 const socketIo = require("socket.io");
 const User = require("../models/User");
+const Call = require("../models/Call");
 const mongoose = require("mongoose");
 const { isConnected } = require("./database");
 let io;
@@ -158,6 +159,184 @@ exports.init = (server, corsOptions) => {
       // Clean up our tracking
       joinedRooms.clear();
       socketUser = null;
+    });
+
+    // Voice Call Events
+    socket.on("voice-call:initiate", async (data) => {
+      try {
+        const { callerId, receiverId, callerName } = data;
+
+        // Prevent self-calling
+        if (callerId === receiverId || callerId.toString() === receiverId.toString()) {
+          console.error(`[BACKEND] Self-calling attempt blocked: ${callerId}`);
+          socket.emit("voice-call:error", { message: "Cannot call yourself" });
+          return;
+        }
+
+        // Create proper conversation ID from both user IDs (sorted to ensure consistency)
+        const sortedIds = [callerId.toString(), receiverId.toString()].sort();
+        const conversationId = `conv_${sortedIds[0]}_${sortedIds[1]}`;
+
+        console.log(`[BACKEND] Voice call initiation from ${callerId} to ${receiverId}`);
+        console.log(`[BACKEND] Conversation ID: ${conversationId}`);
+
+        // Create call record with 'missed' status initially
+        const call = await Call.create({
+          callerId,
+          receiverId,
+          conversationId,
+          callType: 'voice',
+          status: 'missed',
+          initiatedBy: callerId,
+          startTime: new Date()
+        });
+
+        console.log(`[BACKEND] Call record created: ${call._id}`);
+
+        // Emit incoming call to receiver's USER ROOM ONLY (not conversation room!)
+        io.to(receiverId.toString()).emit("voice-call:incoming", {
+          callId: call._id.toString(),
+          callerId,
+          callerName,
+          conversationId
+        });
+
+        console.log(`[BACKEND] Incoming call event sent to receiver user room: ${receiverId}`);
+
+        // Confirm to caller's USER ROOM ONLY
+        io.to(callerId.toString()).emit("voice-call:initiated", {
+          callId: call._id.toString(),
+          conversationId
+        });
+
+        console.log(`[BACKEND] Call initiated confirmation sent to caller user room: ${callerId}`);
+      } catch (error) {
+        console.error("[BACKEND] Error initiating voice call:", error);
+        socket.emit("voice-call:error", { message: "Failed to initiate call" });
+      }
+    });
+
+    socket.on("voice-call:accept", async (data) => {
+      try {
+        const { callId, receiverId } = data;
+
+        // Update call status to 'answered'
+        await Call.findByIdAndUpdate(callId, {
+          status: 'answered',
+          startTime: new Date()
+        });
+
+        // Get call to find caller
+        const call = await Call.findById(callId);
+
+        // Notify BOTH caller and receiver that call was accepted
+        io.to(call.callerId.toString()).emit("voice-call:accepted", {
+          callId
+        });
+
+        // Also notify the receiver (for confirmation)
+        io.to(receiverId.toString()).emit("voice-call:accepted", {
+          callId
+        });
+
+        console.log(`Call ${callId} accepted by ${receiverId}`);
+      } catch (error) {
+        console.error("Error accepting call:", error);
+        socket.emit("voice-call:error", { message: "Failed to accept call" });
+      }
+    });
+
+    socket.on("voice-call:decline", async (data) => {
+      try {
+        const { callId, receiverId } = data;
+
+        // Update call status to 'declined'
+        await Call.findByIdAndUpdate(callId, {
+          status: 'declined',
+          endTime: new Date()
+        });
+
+        // Get call to find caller
+        const call = await Call.findById(callId);
+
+        // Notify caller that call was declined
+        io.to(call.callerId.toString()).emit("voice-call:declined", {
+          callId
+        });
+
+        console.log(`Call ${callId} declined by ${receiverId}`);
+      } catch (error) {
+        console.error("Error declining call:", error);
+        socket.emit("voice-call:error", { message: "Failed to decline call" });
+      }
+    });
+
+    socket.on("voice-call:end", async (data) => {
+      try {
+        const { callId, userId, duration } = data;
+
+        // Get current call to preserve status
+        const call = await Call.findById(callId);
+        
+        if (!call) {
+          console.error(`Call ${callId} not found`);
+          return;
+        }
+
+        // Update call with end time and duration
+        // Preserve the status (answered, declined, etc.) - don't overwrite it
+        await Call.findByIdAndUpdate(callId, {
+          endTime: new Date(),
+          duration: duration || 0
+          // Status is already set (answered/declined/missed) - don't change it
+        });
+
+        // Notify both parties
+        io.to(call.callerId.toString()).emit("voice-call:ended", { callId });
+        io.to(call.receiverId.toString()).emit("voice-call:ended", { callId });
+
+        console.log(`Call ${callId} ended by ${userId}, duration: ${duration}s, status: ${call.status}`);
+      } catch (error) {
+        console.error("Error ending call:", error);
+      }
+    });
+
+    // WebRTC Signaling Events
+    socket.on("voice-call:offer", (data) => {
+      const { offer, callId, from, to } = data;
+
+      // Forward offer to receiver
+      io.to(to.toString()).emit("voice-call:offer", {
+        offer,
+        callId,
+        from
+      });
+
+      console.log(`WebRTC offer forwarded from ${from} to ${to}`);
+    });
+
+    socket.on("voice-call:answer", (data) => {
+      const { answer, callId, from, to } = data;
+
+      // Forward answer to caller
+      io.to(to.toString()).emit("voice-call:answer", {
+        answer,
+        callId,
+        from
+      });
+
+      console.log(`WebRTC answer forwarded from ${from} to ${to}`);
+    });
+
+    socket.on("voice-call:ice-candidate", (data) => {
+      const { candidate, callId, from, to } = data;
+
+      // Forward ICE candidate to other party
+      io.to(to.toString()).emit("voice-call:ice-candidate", {
+        candidate,
+        callId,
+        from
+      });
     });
 
     socket.on("error", (err) => {

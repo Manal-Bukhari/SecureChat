@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { Button } from '../components/ui/Button';
@@ -8,6 +8,13 @@ export default function HomePage() {
   const navigate = useNavigate();
   const { userDetails } = useSelector((state) => state.user);
   const isAuthenticated = sessionStorage.getItem("token") || userDetails;
+
+  // Redirect authenticated users to chat page
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/chat", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   return (
     <div className="min-h-[calc(100vh-64px)] flex flex-col items-center justify-center bg-background px-4 py-16" style={{ margin: 0 }}>

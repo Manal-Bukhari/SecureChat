@@ -51,7 +51,7 @@ export default function RegisterPage() {
     
     if (response.meta.requestStatus === "fulfilled") {
       toast.success(`Welcome, ${response.payload.user.fullName || 'User'}! Account created successfully.`);
-      navigate("/");
+      navigate("/chat");
     } else {
       toast.error(response.payload || "Signup failed.");
     }

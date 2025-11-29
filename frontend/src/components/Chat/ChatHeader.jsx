@@ -1,7 +1,25 @@
-import React from 'react';
-import { MoreVertical, PhoneCall, Video } from 'lucide-react';
+import React, { useState } from 'react';
+import { MoreVertical, PhoneCall, Video, History } from 'lucide-react';
+import { useDispatch } from 'react-redux';
+import { initiateCall } from '../../store/slices/voiceCallSlice';
+import { cn } from '../../lib/utils';
+import CallHistory from '../VoiceCall/CallHistory';
 
 export default function ChatHeader({ activeContact }) {
+  const dispatch = useDispatch();
+  const [isCallHistoryOpen, setIsCallHistoryOpen] = useState(false);
+
+  const handleVoiceCall = () => {
+    if (activeContact && activeContact.isOnline) {
+      // Don't pass conversationId - let it be handled properly later
+      dispatch(initiateCall({
+        contactId: activeContact.id,
+        contactName: activeContact.name || activeContact.fullName,
+        conversationId: null // Will be set by backend based on both user IDs
+      }));
+    }
+  };
+
   return (
     <div className="flex items-center justify-between p-4 border-b border-border bg-card">
       <div className="flex items-center gap-3">
@@ -46,8 +64,23 @@ export default function ChatHeader({ activeContact }) {
         </div>
       </div>
       <div className="flex items-center gap-1">
-        <button className="p-1 rounded-full hover:bg-muted transition-colors">
-          <PhoneCall className="h-5 w-5 text-muted-foreground" />
+        <button
+          className="p-1 rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleVoiceCall}
+          disabled={!activeContact?.isOnline}
+          title={activeContact?.isOnline ? "Start voice call" : "User is offline"}
+        >
+          <PhoneCall className={cn(
+            "h-5 w-5",
+            activeContact?.isOnline ? "text-muted-foreground" : "text-muted-foreground/50"
+          )} />
+        </button>
+        <button
+          className="p-1 rounded-full hover:bg-muted transition-colors"
+          onClick={() => setIsCallHistoryOpen(true)}
+          title="Call history"
+        >
+          <History className="h-5 w-5 text-muted-foreground" />
         </button>
         <button className="p-1 rounded-full hover:bg-muted transition-colors">
           <Video className="h-5 w-5 text-muted-foreground" />
@@ -56,6 +89,16 @@ export default function ChatHeader({ activeContact }) {
           <MoreVertical className="h-5 w-5 text-muted-foreground" />
         </button>
       </div>
+
+      {/* Call History Dialog */}
+      <CallHistory
+        isOpen={isCallHistoryOpen}
+        onOpenChange={setIsCallHistoryOpen}
+        onCallContact={(contact) => {
+          setIsCallHistoryOpen(false);
+          // The call will be initiated by the CallHistory component
+        }}
+      />
     </div>
   );
 }

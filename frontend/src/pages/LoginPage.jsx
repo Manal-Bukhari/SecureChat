@@ -61,7 +61,7 @@ export default function LoginPage() {
         localStorage.removeItem("rememberedEmail");
       }
 
-      navigate("/");
+      navigate("/chat");
     } else {
       toast.error(response.payload || "Login failed.");
     }

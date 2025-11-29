@@ -2,11 +2,29 @@ import React, { useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useSocket } from '../contexts/SocketContext';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import ContactsSidebar from "../components/Chat/ContactsSidebar";
+import NavigationSidebar from "../components/Chat/NavigationSidebar";
 import ChatArea from "../components/Chat/ChatArea";
 import EmptyChatState from "../components/Chat/EmptyChatState";
 import ForwardMessageDialog from "../components/Chat/ForwardMessageDialog";
+import IncomingCallModal from "../components/VoiceCall/IncomingCallModal";
+import ActiveCallModal from "../components/VoiceCall/ActiveCallModal";
 import { fetchContacts, fetchMessages, sendMessage, setSelectedContact, setSelectedGroup, addMessage, getFriendRequests, fetchGroups, getGroupRequests, clearMessages, markMessagesAsRead, markMessageAsRead, updateContactStatus } from '../store/slices/chatSlice';
+import {
+  receiveIncomingCall,
+  acceptCall,
+  declineCall,
+  endCall,
+  toggleMute,
+  toggleSpeaker,
+  updateCallDuration,
+  setCallStatus,
+  clearIncomingCall,
+  setCallId,
+  setCallError
+} from '../store/slices/voiceCallSlice';
+import useVoiceCall from '../hooks/useVoiceCall';
 import { Button } from '../components/ui/Button';
 
 export default function ChatPage() {
@@ -17,10 +35,35 @@ export default function ChatPage() {
   const { socket, isConnected, connectError, reconnect } = useSocket();
   const { contacts, messages, selectedContact, selectedGroup, groups, isContactsLoading, isMessagesLoading, friendRequests } = useSelector((state) => state.chat);
   const { userDetails: user } = useSelector((state) => state.user);
+  const { activeCall, incomingCall } = useSelector((state) => state.voiceCall);
   const [activeId, setActiveId] = useState(null);
   const [processedMessageIds, setProcessedMessageIds] = useState(new Set());
   const [isForwardDialogOpen, setIsForwardDialogOpen] = useState(false);
   const [messageToForward, setMessageToForward] = useState(null);
+  const [activeView, setActiveView] = useState('messages');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  const handleViewChange = (view) => {
+    setActiveView(view);
+    // If switching to calls view and sidebar is collapsed, expand it
+    if (view === 'calls' && isSidebarCollapsed) {
+      setIsSidebarCollapsed(false);
+    }
+  };
+
+  // Initialize WebRTC hook for voice calls
+  const {
+    startCall: startWebRTCCall,
+    answerCall: answerWebRTCCall,
+    endCall: endWebRTCCall,
+    toggleMute: toggleWebRTCMute,
+  } = useVoiceCall(
+    socket,
+    activeCall?.callId,
+    activeCall?.isIncoming === false,
+    activeCall?.contactId,
+    user?.id
+  );
 
   // Calculate active contact and group early so they can be used in effects
   const activeContact = selectedContact || contacts.find(c => c.id === activeId);
@@ -80,8 +123,10 @@ export default function ChatPage() {
   // Emit user online status when connected and join user-specific room
   useEffect(() => {
     if (isConnected && socket && user?.id) {
+      console.log('[SOCKET] Emitting userOnline for user:', user.id);
       socket.emit('userOnline', { userId: user.id });
-      // Join user-specific room for receiving read receipts
+      // Join user-specific room for receiving read receipts and voice calls
+      console.log('[SOCKET] Joining user room:', user.id);
       socket.emit('join', {
         conversationId: user.id, // Use user ID as room ID for user-specific room
         userId: user.id
@@ -111,9 +156,15 @@ export default function ChatPage() {
   // Join room effect (only for contacts, not groups)
   useEffect(() => {
     if (!activeId || !isConnected || !socket || activeGroup) return; // Skip if it's a group
-    console.log('Joining room for conversation:', activeId);
+
+    // Create a proper conversation room ID that's the same for both users
+    // Sort user IDs to ensure consistency
+    const sortedIds = [user?.id, activeId].filter(Boolean).sort();
+    const conversationRoomId = `msg_${sortedIds[0]}_${sortedIds[1]}`;
+
+    console.log('Joining room for conversation:', conversationRoomId);
     socket.emit('join', {
-      conversationId: activeId,
+      conversationId: conversationRoomId,
       userId: user?.id
     });
 
@@ -239,6 +290,180 @@ export default function ChatPage() {
     };
   }, [isConnected, activeId, socket, processedMessageIds, user, dispatch, activeGroup, messages]);
 
+  // Voice call socket listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleIncomingCall = (data) => {
+      console.log('[RECEIVER] Incoming call:', data);
+      console.log('[RECEIVER] Current user ID:', user?.id);
+
+      // Prevent self-calling bug
+      if (data.callerId === user?.id) {
+        console.error('[RECEIVER] Received call from self, ignoring!');
+        return;
+      }
+
+      dispatch(receiveIncomingCall({
+        callId: data.callId,
+        contactId: data.callerId,
+        contactName: data.callerName,
+        conversationId: data.conversationId
+      }));
+    };
+
+    const handleCallInitiated = (data) => {
+      console.log('[CALLER] Call initiated:', data);
+      dispatch(setCallId(data.callId));
+    };
+
+    const handleCallAccepted = (data) => {
+      console.log('Call accepted:', data);
+      // Set status to connected for both caller and receiver
+      dispatch(setCallStatus('connected'));
+      
+      // For caller: start WebRTC now that receiver has accepted
+      if (activeCall && !activeCall.isIncoming && activeCall.callId === data.callId) {
+        console.log('[CALLER] Receiver accepted, starting WebRTC call');
+        startWebRTCCall();
+      }
+    };
+
+    const handleCallDeclined = (data) => {
+      console.log('Call declined:', data);
+      dispatch(endCall());
+      endWebRTCCall();
+      toast.error('Call declined');
+    };
+
+    const handleCallEnded = (data) => {
+      console.log('Call ended:', data);
+      dispatch(endCall());
+      endWebRTCCall();
+    };
+
+    const handleCallError = (data) => {
+      console.error('Call error:', data);
+      dispatch(setCallError(data.message));
+      dispatch(endCall());
+      endWebRTCCall();
+    };
+
+    socket.on('voice-call:incoming', handleIncomingCall);
+    socket.on('voice-call:initiated', handleCallInitiated);
+    socket.on('voice-call:accepted', handleCallAccepted);
+    socket.on('voice-call:declined', handleCallDeclined);
+    socket.on('voice-call:ended', handleCallEnded);
+    socket.on('voice-call:error', handleCallError);
+
+    return () => {
+      socket.off('voice-call:incoming', handleIncomingCall);
+      socket.off('voice-call:initiated', handleCallInitiated);
+      socket.off('voice-call:accepted', handleCallAccepted);
+      socket.off('voice-call:declined', handleCallDeclined);
+      socket.off('voice-call:ended', handleCallEnded);
+      socket.off('voice-call:error', handleCallError);
+    };
+  }, [socket, dispatch, endWebRTCCall, activeCall, startWebRTCCall]);
+
+  // Handle outgoing call - initiate call to backend
+  useEffect(() => {
+    if (activeCall?.status === 'calling' && !activeCall?.isIncoming && !activeCall?.callId && socket && user) {
+      // Prevent self-calling
+      if (activeCall.contactId === user.id) {
+        console.error('Cannot call yourself!');
+        dispatch(endCall());
+        toast.error('Cannot call yourself');
+        return;
+      }
+
+      console.log('[CALLER] Initiating outgoing call...', {
+        callerId: user.id,
+        receiverId: activeCall.contactId
+      });
+
+      // Emit initiate call event to backend to get callId and conversationId
+      // Don't send conversationId - backend will create it properly
+      socket.emit('voice-call:initiate', {
+        callerId: user.id,
+        receiverId: activeCall.contactId,
+        callerName: user.fullName || user.name
+      });
+    }
+  }, [activeCall?.status, activeCall?.callId, activeCall?.isIncoming, activeCall?.contactId, socket, user, dispatch]);
+
+  // Call duration timer
+  useEffect(() => {
+    if (activeCall?.status === 'connected' && activeCall?.callId) {
+      const interval = setInterval(() => {
+        dispatch(updateCallDuration());
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [activeCall?.status, activeCall?.callId, dispatch]);
+
+  // Voice call handler functions
+  const handleAcceptCall = () => {
+    if (incomingCall) {
+      console.log('Accepting call:', incomingCall.callId);
+      dispatch(acceptCall({
+        callId: incomingCall.callId,
+        contactId: incomingCall.contactId,
+        contactName: incomingCall.contactName,
+        conversationId: incomingCall.conversationId
+      }));
+
+      // Emit accept event
+      socket?.emit('voice-call:accept', {
+        callId: incomingCall.callId,
+        receiverId: user?.id
+      });
+
+      dispatch(clearIncomingCall());
+      
+      // Start WebRTC answer flow after accepting
+      console.log('[RECEIVER] Starting WebRTC answer flow after accepting call');
+      answerWebRTCCall();
+    }
+  };
+
+  const handleDeclineCall = () => {
+    if (incomingCall) {
+      console.log('Declining call:', incomingCall.callId);
+      socket?.emit('voice-call:decline', {
+        callId: incomingCall.callId,
+        receiverId: user?.id
+      });
+
+      dispatch(declineCall());
+    }
+  };
+
+  const handleEndCall = () => {
+    if (activeCall?.callId) {
+      console.log('Ending call:', activeCall.callId);
+      const duration = activeCall.duration;
+
+      socket?.emit('voice-call:end', {
+        callId: activeCall.callId,
+        userId: user?.id,
+        duration
+      });
+
+      endWebRTCCall();
+      dispatch(endCall());
+    }
+  };
+
+  const handleToggleMute = () => {
+    toggleWebRTCMute();
+    dispatch(toggleMute());
+  };
+
+  const handleToggleSpeaker = () => {
+    dispatch(toggleSpeaker());
+  };
+
   const handleSend = async (e, messageText, replyingTo = null) => {
     e.preventDefault();
     if (!messageText.trim() || !activeId || !isConnected || activeGroup) return; // Don't send messages for groups
@@ -316,7 +541,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="w-full h-[calc(100vh-64px)] flex flex-col" style={{ margin: 0, padding: 0 }}>
+    <div className="w-full h-screen flex flex-col" style={{ margin: 0, padding: 0 }}>
       {!isConnected && (
         <div className="bg-warning/20 border border-warning/50 p-2 text-warning flex items-center justify-between z-10">
           <span>Connection to messaging service lost.</span>
@@ -326,11 +551,21 @@ export default function ChatPage() {
         </div>
       )}
       <div className="flex-1 flex w-full overflow-hidden" style={{ margin: 0, padding: 0 }}>
-        {/* Contacts Sidebar */}
+        {/* Navigation Sidebar - Always visible */}
+        <NavigationSidebar
+          activeView={activeView}
+          onViewChange={handleViewChange}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        />
+        
+        {/* Contacts Sidebar - Always visible */}
         <ContactsSidebar
           contacts={contacts}
           activeId={activeId}
           setActiveId={handleContactClick}
+          isCollapsed={isSidebarCollapsed}
+          activeView={activeView}
         />
 
         {/* Chat Area or Empty State */}
@@ -378,6 +613,27 @@ export default function ChatPage() {
         open={isForwardDialogOpen}
         onOpenChange={setIsForwardDialogOpen}
         message={messageToForward}
+      />
+
+      {/* Incoming Call Modal */}
+      <IncomingCallModal
+        isOpen={!!incomingCall}
+        callerName={incomingCall?.contactName || 'Unknown'}
+        onAccept={handleAcceptCall}
+        onDecline={handleDeclineCall}
+      />
+
+      {/* Active Call Modal */}
+      <ActiveCallModal
+        isOpen={activeCall?.status !== 'idle' && activeCall?.status !== 'ended' && !!activeCall?.callId}
+        contactName={activeCall?.contactName || 'Unknown'}
+        callStatus={activeCall?.status || 'calling'}
+        duration={activeCall?.duration || 0}
+        isMuted={activeCall?.isMuted || false}
+        isSpeakerOn={activeCall?.isSpeakerOn || false}
+        onToggleMute={handleToggleMute}
+        onToggleSpeaker={handleToggleSpeaker}
+        onEndCall={handleEndCall}
       />
     </div>
   );
