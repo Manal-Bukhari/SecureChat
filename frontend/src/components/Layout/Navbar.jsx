@@ -57,11 +57,6 @@ const Navbar = () => {
     navigate('/login', { replace: true });
   };
 
-  const navLinks = [
-    { name: 'Home', path: '/' },
-    { name: 'Chat', path: '/chat' },
-  ];
-
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
   return (
@@ -87,20 +82,6 @@ const Navbar = () => {
 
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center space-x-8">
-              <Link
-                to="/"
-                className={cn(
-                  "text-sm font-medium transition-colors duration-200 hover:text-primary relative py-2 px-1",
-                  location.pathname === "/"
-                    ? "text-primary"
-                    : "text-foreground/80 hover:text-foreground"
-                )}
-              >
-                Home
-                {location.pathname === "/" && (
-                  <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-primary rounded-full transform transition-transform duration-300"></span>
-                )}
-              </Link>
               {user && (
                 <Link
                   to="/chat"
@@ -196,18 +177,6 @@ const Navbar = () => {
           {mobileMenuOpen && (
             <div className="md:hidden border-t border-border bg-card">
               <div className="px-4 py-3 space-y-3">
-                <Link
-                  to="/"
-                  onClick={closeMobileMenu}
-                  className={cn(
-                    "block text-sm font-medium transition-colors py-2",
-                    location.pathname === "/"
-                      ? "text-primary"
-                      : "text-foreground/80 hover:text-foreground"
-                  )}
-                >
-                  Home
-                </Link>
                 {user && (
                   <Link
                     to="/chat"

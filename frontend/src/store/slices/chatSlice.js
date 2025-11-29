@@ -53,6 +53,45 @@ export const sendMessage = createAsyncThunk(
   }
 );
 
+// Forward a message to friends
+export const forwardMessage = createAsyncThunk(
+  "chat/forwardMessage",
+  async ({ messageId, friendIds }, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(
+        `/messages/forward`,
+        { messageId, friendIds }
+      );
+      toast.success(`Message forwarded to ${response.data.forwardedCount} friend(s)`);
+      if (response.data.errors && response.data.errors.length > 0) {
+        toast.error(`Some forwards failed: ${response.data.errors.length} error(s)`);
+      }
+      return response.data;
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || error.message;
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Mark messages as read
+export const markMessagesAsRead = createAsyncThunk(
+  "chat/markMessagesAsRead",
+  async ({ conversationId, messageIds }, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(
+        `/messages/read`,
+        { conversationId, messageIds }
+      );
+      return response.data;
+    } catch (error) {
+      // Don't show error toast for read receipts
+      return thunkAPI.rejectWithValue(error.response?.data?.error || error.message);
+    }
+  }
+);
+
 export const searchGlobalUsers = createAsyncThunk(
   "chat/searchGlobalUsers",
   async (query, thunkAPI) => {
@@ -306,6 +345,39 @@ const chatSlice = createSlice({
       state.friendRequests = { received: [], sent: [] };
     },
     // Update a message (for pending messages)
+    markMessageAsRead: (state, action) => {
+      const { messageId } = action.payload;
+      const message = state.messages.find(msg => msg.id === messageId);
+      if (message) {
+        message.read = true;
+      }
+    },
+    markMessagesAsReadBatch: (state, action) => {
+      const { messageIds } = action.payload;
+      messageIds.forEach(messageId => {
+        const message = state.messages.find(msg => msg.id === messageId);
+        if (message) {
+          message.read = true;
+        }
+      });
+    },
+    updateContactStatus: (state, action) => {
+      const { userId, isOnline, lastSeen } = action.payload;
+      const contact = state.contacts.find(c => c.userId === userId);
+      if (contact) {
+        contact.isOnline = isOnline;
+        if (lastSeen) {
+          contact.lastSeen = lastSeen;
+        }
+      }
+      // Also update selectedContact if it matches
+      if (state.selectedContact && state.selectedContact.userId === userId) {
+        state.selectedContact.isOnline = isOnline;
+        if (lastSeen) {
+          state.selectedContact.lastSeen = lastSeen;
+        }
+      }
+    },
     updateMessage: (state, action) => {
       const { tempId, message } = action.payload;
       const index = state.messages.findIndex(msg => msg.id === tempId);
@@ -321,6 +393,10 @@ const chatSlice = createSlice({
         message.pending = false;
         message.failed = true;
       }
+    },
+    // Clear messages (useful when switching chats)
+    clearMessages: (state) => {
+      state.messages = [];
     }
   },
   extraReducers: (builder) => {
@@ -342,10 +418,16 @@ const chatSlice = createSlice({
       .addCase(fetchMessages.pending, (state) => {
         state.isMessagesLoading = true;
         state.error = null;
+        // Clear messages when starting to fetch new ones
+        state.messages = [];
       })
       .addCase(fetchMessages.fulfilled, (state, action) => {
         state.isMessagesLoading = false;
-        state.messages = action.payload || [];
+        // Ensure all messages have read field set (default to false if undefined)
+        state.messages = (action.payload || []).map(msg => ({
+          ...msg,
+          read: msg.read !== undefined ? msg.read : false
+        }));
       })
       .addCase(fetchMessages.rejected, (state, action) => {
         state.isMessagesLoading = false;
@@ -353,7 +435,25 @@ const chatSlice = createSlice({
       })
       // sendMessage
       .addCase(sendMessage.fulfilled, (state, action) => {
-        state.messages.push(action.payload);
+        const newMessage = action.payload;
+        // Ensure read field is set (default to false for sent messages)
+        if (newMessage.read === undefined) {
+          newMessage.read = false;
+        }
+        // Remove pending message with temp ID and add the real message
+        const tempId = `temp-${Date.now()}`;
+        const pendingIndex = state.messages.findIndex(msg => 
+          msg.pending && 
+          msg.conversationId === newMessage.conversationId &&
+          msg.text === newMessage.text
+        );
+        if (pendingIndex !== -1) {
+          // Replace pending message with real message
+          state.messages[pendingIndex] = newMessage;
+        } else {
+          // If no pending message found, just add the new message
+          state.messages.push(newMessage);
+        }
       })
       .addCase(sendMessage.rejected, (state, action) => {
         state.error = action.payload;
@@ -512,9 +612,29 @@ const chatSlice = createSlice({
     .addCase(sendGroupRequest.fulfilled, (state, action) => {
       // Refresh group requests to show the sent request
       // This will be handled by getGroupRequests if needed
+    })
+    // markMessagesAsRead
+    .addCase(markMessagesAsRead.fulfilled, (state, action) => {
+      const { messageIds } = action.meta.arg;
+      if (messageIds && Array.isArray(messageIds) && messageIds.length > 0) {
+        messageIds.forEach(messageId => {
+          const message = state.messages.find(msg => msg.id === messageId);
+          if (message) {
+            message.read = true;
+          }
+        });
+      } else {
+        // Mark all unread messages in the conversation as read
+        const { conversationId } = action.meta.arg;
+        state.messages.forEach(msg => {
+          if (msg.conversationId === conversationId && msg.senderId === 'me' && !msg.read) {
+            msg.read = true;
+          }
+        });
+      }
     });
   },
 });
 
-export const { setSelectedContact, setSelectedGroup, clearChatState, addMessage, clearSearchResults, updateMessage, markMessageFailed } = chatSlice.actions;
+export const { setSelectedContact, setSelectedGroup, clearChatState, addMessage, clearSearchResults, updateMessage, markMessageFailed, clearMessages, markMessageAsRead, markMessagesAsReadBatch, updateContactStatus } = chatSlice.actions;
 export default chatSlice.reducer;

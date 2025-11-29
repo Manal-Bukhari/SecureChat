@@ -40,3 +40,4 @@ friendSchema.pre("save", function(next) {
 
 module.exports = mongoose.models.Friend || mongoose.model("Friend", friendSchema);
 
+

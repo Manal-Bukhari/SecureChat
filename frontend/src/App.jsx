@@ -19,22 +19,23 @@ function App() {
       <CryptoProvider>
         <SocketProvider>
           <Router>
-            <div className="App" style={{ margin: 0, padding: 0, width: '100%', height: '100%', minHeight: '100vh' }}>
-              <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-              <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<RegisterPage />} />
-                <Route path="/" element={<Layout />}>
-                  <Route index element={<HomePage />} />
-                  <Route path="chat" element={<ChatPage />} />
-                  <Route path="chat/:id" element={<ChatPage />} />
-                  <Route path="chat/group/:id" element={<ChatPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
-                </Route>
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </div>
-          </Router>
+          <div className="App" style={{ margin: 0, padding: 0, width: '100%', height: '100%', minHeight: '100vh' }}>
+            <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/" element={<Layout />}>
+                <Route index element={<HomePage />} />
+                <Route path="chat" element={<ChatPage />} />
+                <Route path="chat/:id" element={<ChatPage />} />
+                <Route path="chat/group/:id" element={<ChatPage />} />
+                <Route path="calls" element={<ChatPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </div>
+        </Router>
         </SocketProvider>
       </CryptoProvider>
     </Provider>

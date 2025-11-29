@@ -27,8 +27,8 @@ function Layout() {
     }
   }, [dispatch, userDetails]);
 
-  // Protect /chat and /settings routes, allow home page without login
-  const isProtectedRoute = location.pathname === '/chat' || location.pathname === '/settings';
+  // Protect /chat, /calls, and /settings routes, allow home page without login
+  const isProtectedRoute = location.pathname === '/chat' || location.pathname.startsWith('/chat/') || location.pathname === '/calls' || location.pathname === '/settings';
   const isAuthenticated = sessionStorage.getItem("token") || userDetails;
 
   // Redirect to login only if accessing protected routes without authentication
@@ -36,13 +36,18 @@ function Layout() {
     return <Navigate to="/login" replace />;
   }
 
+  // Hide Navbar and Footer on chat and calls routes
+  const isChatRoute = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
+  const isCallsRoute = location.pathname === '/calls';
+  const showNavbarFooter = !isChatRoute && !isCallsRoute;
+
   return (
     <div className="min-h-screen flex flex-col" style={{ margin: 0, padding: 0, width: '100%' }}>
-      <Navbar />
-      <main className="flex-grow pt-16 w-full" style={{ margin: 0, width: '100%' }}>
+      {showNavbarFooter && <Navbar />}
+      <main className={showNavbarFooter ? "flex-grow pt-16 w-full" : "flex-grow w-full"} style={{ margin: 0, width: '100%' }}>
         <Outlet />
       </main>
-      <Footer />
+      {showNavbarFooter && <Footer />}
     </div>
   );
 }

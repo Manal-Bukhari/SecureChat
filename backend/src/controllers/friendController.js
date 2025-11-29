@@ -42,13 +42,13 @@ exports.getFriends = async (req, res) => {
     const friendships = await Friend.find({
       userId: currentUserId,
       status: "accepted"
-    }).populate("friendId", "fullName email gender department isOnline");
+    }).populate("friendId", "fullName email gender department isOnline lastSeen");
 
     // Also get reverse friendships (where current user is the friend)
     const reverseFriendships = await Friend.find({
       friendId: currentUserId,
       status: "accepted"
-    }).populate("userId", "fullName email gender department isOnline");
+    }).populate("userId", "fullName email gender department isOnline lastSeen");
 
     // Combine both directions
     const allFriends = [];
@@ -87,9 +87,7 @@ exports.getFriends = async (req, res) => {
           department: friend.department,
           isOnline: friend.isOnline || false,
           lastMessage: conversation.lastMessage || "",
-          lastSeen: conversation.lastMessageTimestamp 
-            ? conversation.lastMessageTimestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) 
-            : "",
+          lastSeen: friend.lastSeen || null,
           unreadCount
         });
       }
@@ -134,9 +132,7 @@ exports.getFriends = async (req, res) => {
           department: friend.department,
           isOnline: friend.isOnline || false,
           lastMessage: conversation.lastMessage || "",
-          lastSeen: conversation.lastMessageTimestamp 
-            ? conversation.lastMessageTimestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) 
-            : "",
+          lastSeen: friend.lastSeen || null,
           unreadCount
         });
       }

@@ -1,15 +1,31 @@
-import React from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { MoreVertical, PhoneCall, Video } from 'lucide-react';
+import { MoreVertical, PhoneCall, Video, History } from 'lucide-react';
+import { useDispatch } from 'react-redux';
+import { initiateCall } from '../../store/slices/voiceCallSlice';
+import { cn } from '../../lib/utils';
+import CallHistory from '../VoiceCall/CallHistory';
 
 export default function ChatHeader({ activeContact }) {
   // Safety guard
   if (!activeContact) return null;
 
-  const name = activeContact.name || "Unknown User";
+  const dispatch = useDispatch();
+  const [isCallHistoryOpen, setIsCallHistoryOpen] = useState(false);
+
+  const name = activeContact.name || activeContact.fullName || "Unknown User";
   const initial = name.charAt(0).toUpperCase();
-  const isOnline = activeContact.isOnline || false;
-  const statusText = isOnline ? 'Online' : (activeContact.lastSeen || 'Offline');
+
+  const handleVoiceCall = () => {
+    if (activeContact && activeContact.isOnline) {
+      // Don't pass conversationId - let it be handled properly later
+      dispatch(initiateCall({
+        contactId: activeContact.userId,
+        contactName: name,
+        conversationId: null // Will be set by backend based on both user IDs
+      }));
+    }
+  };
 
   return (
     <div className="flex items-center justify-between p-4 border-b border-border bg-card shrink-0 h-16">
@@ -20,23 +36,58 @@ export default function ChatHeader({ activeContact }) {
               {initial}
             </span>
           </div>
-          {isOnline && (
+          {activeContact.isOnline && (
             <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-success border-2 border-background" />
           )}
         </div>
         <div>
           <h3 className="font-medium text-foreground leading-none">{name}</h3>
           <p className="text-xs text-muted-foreground mt-1">
-            {statusText}
+            {activeContact.isOnline ? (
+              'Online'
+            ) : activeContact.lastSeen ? (
+              (() => {
+                try {
+                  const lastSeenDate = new Date(activeContact.lastSeen);
+                  const now = new Date();
+                  const diffMs = now - lastSeenDate;
+                  const diffMins = Math.floor(diffMs / 60000);
+                  const diffHours = Math.floor(diffMs / 3600000);
+                  const diffDays = Math.floor(diffMs / 86400000);
+
+                  if (diffMins < 1) return 'Just now';
+                  if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+                  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+                  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+                  return lastSeenDate.toLocaleDateString();
+                } catch (e) {
+                  return 'Offline';
+                }
+              })()
+            ) : (
+              'Offline'
+            )}
           </p>
         </div>
       </div>
       <div className="flex items-center gap-1">
-        <button 
-          className="p-2 rounded-full hover:bg-muted transition-colors"
-          title="Voice Call"
+        <button
+          className="p-1 rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleVoiceCall}
+          disabled={!activeContact?.isOnline}
+          title={activeContact?.isOnline ? "Start voice call" : "User is offline"}
         >
-          <PhoneCall className="h-5 w-5 text-muted-foreground" />
+          <PhoneCall className={cn(
+            "h-5 w-5",
+            activeContact?.isOnline ? "text-muted-foreground" : "text-muted-foreground/50"
+          )} />
+        </button>
+        <button
+          className="p-1 rounded-full hover:bg-muted transition-colors"
+          onClick={() => setIsCallHistoryOpen(true)}
+          title="Call history"
+        >
+          <History className="h-5 w-5 text-muted-foreground" />
         </button>
         <button 
           className="p-2 rounded-full hover:bg-muted transition-colors"
@@ -51,13 +102,21 @@ export default function ChatHeader({ activeContact }) {
           <MoreVertical className="h-5 w-5 text-muted-foreground" />
         </button>
       </div>
+
+      {/* Call History Dialog */}
+      <CallHistory
+        isOpen={isCallHistoryOpen}
+        onOpenChange={setIsCallHistoryOpen}
+      />
     </div>
   );
 }
 
 ChatHeader.propTypes = {
   activeContact: PropTypes.shape({
+    userId: PropTypes.string,
     name: PropTypes.string,
+    fullName: PropTypes.string,
     isOnline: PropTypes.bool,
     lastSeen: PropTypes.string,
   }),

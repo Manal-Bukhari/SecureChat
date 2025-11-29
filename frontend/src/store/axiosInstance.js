@@ -21,4 +21,37 @@ axiosInstance.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// Response interceptor to handle authentication errors
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Handle 401 (Unauthorized) and 403 (Forbidden) errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      // Clear all authentication data
+      sessionStorage.removeItem("token");
+      sessionStorage.removeItem("user");
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      localStorage.removeItem("rememberedEmail");
+      
+      // Clear all cache
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          names.forEach((name) => {
+            caches.delete(name);
+          });
+        });
+      }
+      
+      // Redirect to login page
+      // Use window.location to ensure a full page reload and state reset
+      // This will also clear Redux state as the app reloads
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default axiosInstance;
