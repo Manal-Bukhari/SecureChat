@@ -256,12 +256,23 @@ class CryptoService {
   }
 
   /**
-   * Clear cached keys (call on logout)
+   * Clear in-memory cached keys (call on logout)
+   * IMPORTANT: This does NOT clear localStorage - keys persist for next login!
    */
   clearKeys() {
     this.sharedKeys.clear();
     this.keyPair = null;
-    console.log('🗑️  Crypto keys cleared');
+    console.log('🗑️ In-memory crypto keys cleared (localStorage keys preserved)');
+  }
+
+  /**
+   * DANGER: Permanently delete keys from localStorage
+   * Only call this if user wants to delete their encryption keys!
+   */
+  deleteKeysFromStorage(userId) {
+    localStorage.removeItem(`privateKey_${userId}`);
+    localStorage.removeItem(`publicKey_${userId}`);
+    console.warn('⚠️ KEYS DELETED FROM STORAGE! Old messages will be unreadable!');
   }
 
   /**
@@ -290,6 +301,7 @@ class CryptoService {
 
   /**
    * Save keys to localStorage
+   * CRITICAL: This ensures keys persist across logout/login!
    */
   async saveKeys(userId) {
     if (!this.keyPair) {
@@ -298,6 +310,8 @@ class CryptoService {
     }
 
     try {
+      console.log(`💾 Saving keys for user: ${userId}`);
+      
       // Export private key
       const privateKeyData = await window.crypto.subtle.exportKey(
         'pkcs8',
@@ -310,30 +324,53 @@ class CryptoService {
         this.keyPair.publicKey
       );
 
-      // Save both to localStorage
-      localStorage.setItem(`privateKey_${userId}`, this.arrayBufferToBase64(privateKeyData));
-      localStorage.setItem(`publicKey_${userId}`, this.arrayBufferToBase64(publicKeyData));
+      // Save both to localStorage with userId
+      const privateKeyBase64 = this.arrayBufferToBase64(privateKeyData);
+      const publicKeyBase64 = this.arrayBufferToBase64(publicKeyData);
       
-      console.log('💾 Keys saved to localStorage');
-      return true;
+      localStorage.setItem(`privateKey_${userId}`, privateKeyBase64);
+      localStorage.setItem(`publicKey_${userId}`, publicKeyBase64);
+      
+      // Verify they were saved
+      const savedPrivate = localStorage.getItem(`privateKey_${userId}`);
+      const savedPublic = localStorage.getItem(`publicKey_${userId}`);
+      
+      if (savedPrivate && savedPublic) {
+        console.log('✅ Keys saved to localStorage successfully');
+        console.log(`   - Private key length: ${savedPrivate.length} chars`);
+        console.log(`   - Public key length: ${savedPublic.length} chars`);
+        return true;
+      } else {
+        console.error('❌ Keys were not saved to localStorage!');
+        return false;
+      }
     } catch (error) {
-      console.error('Failed to save keys:', error);
+      console.error('❌ Failed to save keys:', error);
       return false;
     }
   }
 
   /**
    * Load keys from localStorage
+   * CRITICAL: This restores keys on login!
    */
   async loadKeys(userId) {
     try {
+      console.log(`🔍 Attempting to load keys for user: ${userId}`);
+      
       const privateKeyBase64 = localStorage.getItem(`privateKey_${userId}`);
       const publicKeyBase64 = localStorage.getItem(`publicKey_${userId}`);
 
       if (!privateKeyBase64 || !publicKeyBase64) {
-        console.log('📭 No saved keys found');
+        console.log('📭 No saved keys found in localStorage');
+        console.log(`   - Checked for: privateKey_${userId}`);
+        console.log(`   - Checked for: publicKey_${userId}`);
         return false;
       }
+
+      console.log('📦 Found saved keys in localStorage');
+      console.log(`   - Private key length: ${privateKeyBase64.length} chars`);
+      console.log(`   - Public key length: ${publicKeyBase64.length} chars`);
 
       // Import private key
       const privateKeyData = this.base64ToArrayBuffer(privateKeyBase64);
@@ -362,10 +399,11 @@ class CryptoService {
       );
 
       this.keyPair = { privateKey, publicKey };
-      console.log('♻️ Keys loaded from localStorage');
+      console.log('✅ Keys loaded and imported successfully');
       return true;
     } catch (error) {
-      console.error('Failed to load keys:', error);
+      console.error('❌ Failed to load keys:', error);
+      console.error('   Error details:', error.message);
       return false;
     }
   }
