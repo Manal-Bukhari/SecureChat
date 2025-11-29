@@ -94,10 +94,6 @@ export default function ChatHeader({ activeContact }) {
       <CallHistory
         isOpen={isCallHistoryOpen}
         onOpenChange={setIsCallHistoryOpen}
-        onCallContact={(contact) => {
-          setIsCallHistoryOpen(false);
-          // The call will be initiated by the CallHistory component
-        }}
       />
     </div>
   );

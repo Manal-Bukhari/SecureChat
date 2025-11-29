@@ -1,15 +1,21 @@
 import React from 'react';
 import { MessageSquare, Phone, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import { useSelector } from 'react-redux';
 
 export default function NavigationSidebar({ activeView, onViewChange, isCollapsed, onToggleCollapse }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { userDetails: user } = useSelector((state) => state.user);
   const { friendRequests, groupRequests } = useSelector((state) => state.chat);
   
   const pendingRequestsCount = (friendRequests?.received?.length || 0) + (groupRequests?.received?.length || 0);
+
+  // Determine active view from URL path
+  const isCallsRoute = location.pathname === '/calls';
+  const isChatRoute = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
+  const currentActiveView = isCallsRoute ? 'calls' : (isChatRoute ? 'messages' : (activeView || 'messages'));
 
   const navItems = [
     {
@@ -17,18 +23,24 @@ export default function NavigationSidebar({ activeView, onViewChange, isCollapse
       icon: MessageSquare,
       label: 'Chats',
       badge: pendingRequestsCount > 0 ? pendingRequestsCount : null,
-      active: activeView === 'messages'
+      active: currentActiveView === 'messages'
     },
     {
       id: 'calls',
       icon: Phone,
       label: 'Calls',
-      active: activeView === 'calls'
+      active: currentActiveView === 'calls'
     }
   ];
 
   const handleNavClick = (itemId) => {
-    onViewChange(itemId);
+    if (itemId === 'calls') {
+      navigate('/calls');
+    } else if (itemId === 'messages') {
+      navigate('/chat');
+    } else {
+      onViewChange(itemId);
+    }
   };
 
   return (

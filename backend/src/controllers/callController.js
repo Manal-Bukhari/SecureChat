@@ -1,14 +1,10 @@
 const Call = require('../models/Call');
-const User = require('../models/User');
 
 // Get call history for the current user
 exports.getCallHistory = async (req, res) => {
   try {
     const userId = req.user.userId || req.user.id;
     const { limit = 50, offset = 0 } = req.query;
-
-    console.log(`[CALL HISTORY] Fetching call history for user: ${userId}`);
-    console.log(`[CALL HISTORY] Query params: limit=${limit}, offset=${offset}`);
 
     // Convert userId to ObjectId for consistent querying
     const mongoose = require('mongoose');
@@ -19,15 +15,6 @@ exports.getCallHistory = async (req, res) => {
       console.error(`[CALL HISTORY] Invalid userId format: ${userId}`);
       return res.status(400).json({ message: 'Invalid user ID format' });
     }
-
-    // Debug: Check total calls in database
-    const totalCalls = await Call.countDocuments({});
-    console.log(`[CALL HISTORY] Total calls in database: ${totalCalls}`);
-
-    // Debug: Check calls with this userId as caller
-    const callsAsCaller = await Call.countDocuments({ callerId: userIdObj });
-    const callsAsReceiver = await Call.countDocuments({ receiverId: userIdObj });
-    console.log(`[CALL HISTORY] Calls as caller: ${callsAsCaller}, Calls as receiver: ${callsAsReceiver}`);
 
     // Find calls where user is either caller or receiver
     const calls = await Call.find({
@@ -42,18 +29,6 @@ exports.getCallHistory = async (req, res) => {
       .limit(parseInt(limit))
       .skip(parseInt(offset));
 
-    console.log(`[CALL HISTORY] Found ${calls.length} calls for user ${userId}`);
-    
-    // Debug: Log first call if exists
-    if (calls.length > 0) {
-      console.log(`[CALL HISTORY] First call sample:`, {
-        id: calls[0]._id.toString(),
-        callerId: calls[0].callerId?._id?.toString() || calls[0].callerId?.toString(),
-        receiverId: calls[0].receiverId?._id?.toString() || calls[0].receiverId?.toString(),
-        status: calls[0].status
-      });
-    }
-
     // Format the response
     const formattedCalls = calls
       .map(call => {
@@ -67,7 +42,7 @@ exports.getCallHistory = async (req, res) => {
 
           // If populate failed, we need to fetch user data separately
           if (!contact || (!contact.fullName && !contact.name)) {
-            console.warn(`[CALL HISTORY] Contact not populated for call ${call._id}, callerId: ${callerIdStr}, receiverId: ${receiverIdStr}`);
+            // Contact not populated - will use fallback values
           }
 
           return {
@@ -107,13 +82,9 @@ exports.getCallHistory = async (req, res) => {
         // Filter out calls with "Unknown" contact name
         const contactName = call.contact?.name || '';
         const isUnknown = contactName.toLowerCase() === 'unknown' || !contactName;
-        if (isUnknown) {
-          console.log(`[CALL HISTORY] Filtering out call ${call.id} with Unknown contact`);
-        }
         return !isUnknown;
       });
 
-    console.log(`[CALL HISTORY] Returning ${formattedCalls.length} formatted calls (after filtering Unknown)`);
     res.json(formattedCalls);
   } catch (error) {
     console.error('[CALL HISTORY] Error fetching call history:', error);

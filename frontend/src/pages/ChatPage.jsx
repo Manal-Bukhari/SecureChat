@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useSocket } from '../contexts/SocketContext';
-import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import ContactsSidebar from "../components/Chat/ContactsSidebar";
 import NavigationSidebar from "../components/Chat/NavigationSidebar";
@@ -32,6 +32,7 @@ export default function ChatPage() {
   const location = useLocation();
   const params = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const dispatch = useDispatch();
   const { socket, isConnected, connectError, reconnect } = useSocket();
   const { contacts, messages, selectedContact, selectedGroup, groups, isContactsLoading, isMessagesLoading, friendRequests } = useSelector((state) => state.chat);
@@ -41,11 +42,32 @@ export default function ChatPage() {
   const [processedMessageIds, setProcessedMessageIds] = useState(new Set());
   const [isForwardDialogOpen, setIsForwardDialogOpen] = useState(false);
   const [messageToForward, setMessageToForward] = useState(null);
-  const [activeView, setActiveView] = useState('messages');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  // Determine activeView from URL path or search params
+  const isCallsRoute = location.pathname === '/calls';
+  const activeView = isCallsRoute ? 'calls' : (searchParams.get('view') || 'messages');
+
+  // Initialize view from URL on mount (only for chat routes, not calls route)
+  useEffect(() => {
+    if (!isCallsRoute) {
+      const viewParam = searchParams.get('view');
+      if (!viewParam || (viewParam !== 'messages' && viewParam !== 'requests' && viewParam !== 'groups')) {
+        // If no valid view param, set default to messages
+        if (!viewParam) {
+          setSearchParams({ view: 'messages' }, { replace: true });
+        }
+      }
+    }
+  }, [searchParams, setSearchParams, isCallsRoute]);
+
   const handleViewChange = (view) => {
-    setActiveView(view);
+    if (view === 'calls') {
+      navigate('/calls');
+    } else {
+      // Update URL with new view for chat routes
+      setSearchParams({ view }, { replace: true });
+    }
     // If switching to calls view and sidebar is collapsed, expand it
     if (view === 'calls' && isSidebarCollapsed) {
       setIsSidebarCollapsed(false);
@@ -98,7 +120,7 @@ export default function ChatPage() {
       if (contactToOpen) {
         setActiveId(contactToOpen.id);
         dispatch(setSelectedContact(contactToOpen));
-        navigate(`/chat/${contactToOpen.id}`, { replace: true });
+        navigate(`/chat/${contactToOpen.id}?view=messages`, { replace: true });
       }
     } else {
       // No active chat - clear selection
@@ -545,13 +567,13 @@ export default function ChatPage() {
       setActiveId(contactId);
       dispatch(setSelectedGroup(group));
       dispatch(setSelectedContact(null)); // Clear contact selection
-      navigate(`/chat/group/${contactId}`, { replace: true });
+      navigate(`/chat/group/${contactId}?view=messages`, { replace: true });
     } else if (contact) {
       // It's a contact - navigate to contact route
       setActiveId(contactId);
       dispatch(setSelectedContact(contact));
       dispatch(setSelectedGroup(null)); // Clear group selection
-      navigate(`/chat/${contactId}`, { replace: true });
+      navigate(`/chat/${contactId}?view=messages`, { replace: true });
     }
   };
 

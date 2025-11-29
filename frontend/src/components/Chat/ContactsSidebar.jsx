@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, MessageSquare, UserCheck, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchContacts, getFriendRequests, fetchGroups, getGroupRequests } from '../../store/slices/chatSlice';
 import { fetchCallHistory, deleteCallFromHistory, initiateCall } from '../../store/slices/voiceCallSlice';
@@ -13,8 +13,17 @@ import GroupsList from './GroupsList';
 import CallHistoryList from '../VoiceCall/CallHistoryList';
 
 export default function ContactsSidebar({ contacts, activeId, setActiveId, isCollapsed, activeView }) {
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('messages'); // 'messages', 'requests', or 'groups'
+  const isCallsRoute = location.pathname === '/calls';
+  
+  // Get activeTab from URL, default to 'messages' when activeView is 'messages'
+  const viewParam = searchParams.get('view') || 'messages';
+  const subTab = searchParams.get('subTab');
+  const activeTab = activeView === 'calls' ? 'messages' : 
+    (viewParam === 'requests' ? (subTab || 'friend-requests') : 
+     viewParam === 'groups' ? 'groups' : 'messages');
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [isCreateGroupDialogOpen, setIsCreateGroupDialogOpen] = useState(false);
   const [deletingCallId, setDeletingCallId] = useState(null);
@@ -35,18 +44,32 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
     ? contacts.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()))
     : contacts;
 
+  // Filter call history by search term (UI-level filtering, no API calls)
+  const filteredCallHistory = React.useMemo(() => {
+    if (!callHistory || callHistory.length === 0) return [];
+    if (!searchTerm.trim()) return callHistory;
+    const searchLower = searchTerm.toLowerCase();
+    // Filter existing call history data without making API calls
+    return callHistory.filter(call => 
+      call.contact?.name?.toLowerCase().includes(searchLower)
+    );
+  }, [callHistory, searchTerm]);
+
   const handleSearchChange = (e) => {
+    // Only update search term state - no API calls triggered
     setSearchTerm(e.target.value);
   };
 
   const selectContact = (id) => {
     setActiveId(id);
-    navigate(`/chat/${id}`, { replace: true });
+    // Always navigate to chat route when selecting a contact
+    navigate(`/chat/${id}?view=messages`, { replace: true });
   };
 
   const selectGroup = (groupId) => {
     setActiveId(groupId);
-    navigate(`/chat/group/${groupId}`, { replace: true });
+    // Always navigate to chat route when selecting a group
+    navigate(`/chat/group/${groupId}?view=messages`, { replace: true });
   };
 
   const handleRefreshMessages = () => {
@@ -58,6 +81,7 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
   const handleAddFriend = () => {
     setIsAddFriendDialogOpen(true);
   };
+
 
   // Fetch call history when activeView is 'calls'
   useEffect(() => {
@@ -93,7 +117,6 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
     // Use contact.id (which is the user ID from call history)
     const contactId = contact.id;
     if (!contactId) {
-      console.error('Contact ID not available');
       return;
     }
 
@@ -175,7 +198,9 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
         {activeView !== 'calls' && (
         <div className="flex gap-1 mb-3 border-b border-border">
           <button
-            onClick={() => setActiveTab('messages')}
+            onClick={() => {
+              setSearchParams({ view: 'messages' }, { replace: true });
+            }}
             className={cn(
               "flex-1 py-2 px-2 text-xs font-medium transition-colors relative",
               activeTab === 'messages'
@@ -193,7 +218,7 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
           </button>
           <button
             onClick={() => {
-              setActiveTab('friend-requests');
+              setSearchParams({ view: 'requests' }, { replace: true });
               dispatch(getFriendRequests());
               dispatch(getGroupRequests());
             }}
@@ -219,7 +244,7 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
           </button>
           <button
             onClick={() => {
-              setActiveTab('groups');
+              setSearchParams({ view: 'groups' }, { replace: true });
               dispatch(fetchGroups());
             }}
             className={cn(
@@ -240,33 +265,45 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
         </div>
         )}
 
-        {/* Search bar and Create Group button - Only show if not in calls view */}
-        {activeView !== 'calls' && (
-        <div className="flex gap-2">
-          <div className="relative flex-1">
+        {/* Search bar and Create Group button */}
+        {activeView === 'calls' ? (
+          /* Search bar for call history */
+          <div className="relative">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-              placeholder={
-                activeTab === 'messages' ? "Search or start new chat" : 
-                activeTab === 'requests' || activeTab === 'friend-requests' || activeTab === 'group-requests' ? "Search requests..." : 
-                "Search groups..."
-              }
+            <input
+              type="text"
+              placeholder="Search calls by contact name..."
               className="w-full pl-10 pr-3 py-2 bg-background border border-input rounded-lg text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition"
-            value={searchTerm}
+              value={searchTerm}
               onChange={handleSearchChange}
             />
           </div>
-          {activeTab === 'groups' && (
-            <button
-              onClick={() => setIsCreateGroupDialogOpen(true)}
-              className="p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-              title="Create Group"
-            >
-              <Users className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+        ) : (
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder={
+                  activeTab === 'messages' ? "Search or start new chat" : 
+                  activeTab === 'requests' || activeTab === 'friend-requests' || activeTab === 'group-requests' ? "Search requests..." : 
+                  "Search groups..."
+                }
+                className="w-full pl-10 pr-3 py-2 bg-background border border-input rounded-lg text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition"
+                value={searchTerm}
+                onChange={handleSearchChange}
+              />
+            </div>
+            {activeTab === 'groups' && (
+              <button
+                onClick={() => setIsCreateGroupDialogOpen(true)}
+                className="p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                title="Create Group"
+              >
+                <Users className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -275,7 +312,7 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
         {activeView === 'calls' ? (
           /* Call History View */
           <CallHistoryList
-            calls={callHistory || []}
+            calls={filteredCallHistory}
             onCallClick={handleCallClick}
             isLoading={isHistoryLoading}
             onDelete={handleDeleteCall}
@@ -288,7 +325,9 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
           <div className="flex flex-col h-full">
             <div className="flex gap-2 mb-2 px-2 border-b border-border">
               <button
-                onClick={() => setActiveTab('friend-requests')}
+                onClick={() => {
+                  setSearchParams({ view: 'requests', subTab: 'friend-requests' }, { replace: true });
+                }}
                 className={cn(
                   "flex-1 py-2 px-2 text-xs font-medium transition-colors relative",
                   activeTab === 'friend-requests' ? "text-primary" : "text-muted-foreground"
@@ -302,7 +341,9 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
                 )}
               </button>
               <button
-                onClick={() => setActiveTab('group-requests')}
+                onClick={() => {
+                  setSearchParams({ view: 'requests', subTab: 'group-requests' }, { replace: true });
+                }}
                 className={cn(
                   "flex-1 py-2 px-2 text-xs font-medium transition-colors relative",
                   activeTab === 'group-requests' ? "text-primary" : "text-muted-foreground"

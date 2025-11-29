@@ -3,9 +3,8 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
 import { Button } from '../ui/Button';
 import { Filter } from 'lucide-react';
-import { fetchCallHistory, deleteCallFromHistory } from '../../store/slices/voiceCallSlice';
+import { fetchCallHistory, deleteCallFromHistory, initiateCall } from '../../store/slices/voiceCallSlice';
 import CallHistoryList from './CallHistoryList';
-import { initiateCall } from '../../store/slices/voiceCallSlice';
 import { cn } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
 
@@ -74,12 +73,6 @@ export default function CallHistory({ isOpen, onOpenChange }) {
       toast.error('Contact ID not available');
       return;
     }
-
-    console.log('[CALL HISTORY] Initiating call to contact:', {
-      contactId,
-      contactName: contact.name,
-      userId: user.id
-    });
 
     dispatch(initiateCall({
       contactId: contactId,
