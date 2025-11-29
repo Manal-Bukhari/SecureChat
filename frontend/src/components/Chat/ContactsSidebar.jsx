@@ -72,6 +72,7 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
       setDeletingCallId(callId);
       try {
         await dispatch(deleteCallFromHistory(callId)).unwrap();
+        // State is updated by the reducer, no need to refetch
       } catch (error) {
         console.error('Error deleting call:', error);
       } finally {
@@ -81,13 +82,26 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
   };
 
   const handleCallClick = (contact) => {
-    if (contact && contact.isOnline) {
-      dispatch(initiateCall({
-        contactId: contact.userId,
-        contactName: contact.name,
-        conversationId: null
-      }));
+    if (!contact) {
+      return;
     }
+
+    if (!contact.isOnline) {
+      return;
+    }
+
+    // Use contact.id (which is the user ID from call history)
+    const contactId = contact.id;
+    if (!contactId) {
+      console.error('Contact ID not available');
+      return;
+    }
+
+    dispatch(initiateCall({
+      contactId: contactId,
+      contactName: contact.name,
+      conversationId: null
+    }));
   };
 
   return (

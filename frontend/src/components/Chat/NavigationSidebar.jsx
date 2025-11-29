@@ -50,19 +50,6 @@ export default function NavigationSidebar({ activeView, onViewChange, isCollapse
           )}
         </button>
 
-        {/* App Logo/Branding */}
-        <div className="mb-6">
-          <div className={cn(
-            "rounded-full bg-primary flex items-center justify-center transition-all",
-            isCollapsed ? "h-10 w-10" : "h-12 w-12"
-          )}>
-            <MessageSquare className={cn(
-              "text-primary-foreground transition-all",
-              isCollapsed ? "h-5 w-5" : "h-6 w-6"
-            )} />
-          </div>
-        </div>
-
         {/* Navigation Items */}
         <nav className="flex-1 flex flex-col gap-2 w-full px-2">
           {navItems.map((item) => {

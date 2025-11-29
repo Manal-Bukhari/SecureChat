@@ -22,7 +22,8 @@ import {
   setCallStatus,
   clearIncomingCall,
   setCallId,
-  setCallError
+  setCallError,
+  fetchCallHistory
 } from '../store/slices/voiceCallSlice';
 import useVoiceCall from '../hooks/useVoiceCall';
 import { Button } from '../components/ui/Button';
@@ -341,6 +342,8 @@ export default function ChatPage() {
       dispatch(endCall());
       endWebRTCCall();
       toast.error('Call was declined');
+      // Refresh call history after call is declined
+      dispatch(fetchCallHistory({ limit: 100, offset: 0 }));
     };
 
     const handleCallEnded = (data) => {
@@ -351,6 +354,8 @@ export default function ChatPage() {
       if (activeCall?.status === 'connected') {
         toast.success('Call ended');
       }
+      // Refresh call history after call ends
+      dispatch(fetchCallHistory({ limit: 100, offset: 0 }));
     };
 
     const handleCallError = (data) => {
@@ -451,6 +456,8 @@ export default function ChatPage() {
       });
 
       dispatch(declineCall());
+      // Refresh call history after declining call
+      dispatch(fetchCallHistory({ limit: 100, offset: 0 }));
     }
   };
 
@@ -467,6 +474,8 @@ export default function ChatPage() {
 
       endWebRTCCall();
       dispatch(endCall());
+      // Refresh call history after ending call
+      dispatch(fetchCallHistory({ limit: 100, offset: 0 }));
     }
   };
 

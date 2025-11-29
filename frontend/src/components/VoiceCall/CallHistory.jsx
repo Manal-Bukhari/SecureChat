@@ -7,6 +7,7 @@ import { fetchCallHistory, deleteCallFromHistory } from '../../store/slices/voic
 import CallHistoryList from './CallHistoryList';
 import { initiateCall } from '../../store/slices/voiceCallSlice';
 import { cn } from '../../lib/utils';
+import { toast } from 'react-hot-toast';
 
 const STATUS_FILTERS = [
   { value: 'all', label: 'All Calls' },
@@ -18,6 +19,7 @@ const STATUS_FILTERS = [
 export default function CallHistory({ isOpen, onOpenChange }) {
   const dispatch = useDispatch();
   const { callHistory, isHistoryLoading } = useSelector((state) => state.voiceCall);
+  const { userDetails: user } = useSelector((state) => state.user);
   const [statusFilter, setStatusFilter] = useState('all');
   const [deletingCallId, setDeletingCallId] = useState(null);
 
@@ -41,6 +43,7 @@ export default function CallHistory({ isOpen, onOpenChange }) {
       setDeletingCallId(callId);
       try {
         await dispatch(deleteCallFromHistory(callId)).unwrap();
+        // State is updated by the reducer, no need to refetch
       } catch (error) {
         console.error('Error deleting call:', error);
       } finally {
@@ -50,14 +53,40 @@ export default function CallHistory({ isOpen, onOpenChange }) {
   };
 
   const handleCallClick = (contact) => {
-    if (contact && contact.isOnline) {
-      dispatch(initiateCall({
-        contactId: contact.userId || contact.id,
-        contactName: contact.name,
-        conversationId: null
-      }));
-      onOpenChange(false); // Close history modal
+    if (!contact) {
+      toast.error('Contact information not available');
+      return;
     }
+
+    if (!contact.isOnline) {
+      toast.error('Contact is offline');
+      return;
+    }
+
+    if (!user?.id) {
+      toast.error('User information not available');
+      return;
+    }
+
+    // Use contact.id (which is the user ID from call history)
+    const contactId = contact.id;
+    if (!contactId) {
+      toast.error('Contact ID not available');
+      return;
+    }
+
+    console.log('[CALL HISTORY] Initiating call to contact:', {
+      contactId,
+      contactName: contact.name,
+      userId: user.id
+    });
+
+    dispatch(initiateCall({
+      contactId: contactId,
+      contactName: contact.name,
+      conversationId: null
+    }));
+    onOpenChange(false); // Close history modal
   };
 
   return (

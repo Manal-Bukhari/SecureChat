@@ -189,7 +189,11 @@ const voiceCallSlice = createSlice({
       })
       // deleteCallFromHistory
       .addCase(deleteCallFromHistory.fulfilled, (state, action) => {
-        state.callHistory = state.callHistory.filter(call => call.id !== action.payload);
+        const deletedCallId = action.payload?.toString();
+        state.callHistory = state.callHistory.filter(call => {
+          const callId = call.id?.toString();
+          return callId !== deletedCallId;
+        });
         toast.success('Call deleted from history');
       })
       .addCase(deleteCallFromHistory.rejected, (state, action) => {

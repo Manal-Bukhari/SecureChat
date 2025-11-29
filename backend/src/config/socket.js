@@ -166,6 +166,13 @@ exports.init = (server, corsOptions) => {
       try {
         const { callerId, receiverId, callerName } = data;
 
+        // Validate required fields
+        if (!callerId || !receiverId) {
+          console.error(`[BACKEND] Missing required fields: callerId=${callerId}, receiverId=${receiverId}`);
+          socket.emit("voice-call:error", { message: "Missing caller or receiver ID" });
+          return;
+        }
+
         // Prevent self-calling
         if (callerId === receiverId || callerId.toString() === receiverId.toString()) {
           console.error(`[BACKEND] Self-calling attempt blocked: ${callerId}`);
@@ -192,6 +199,13 @@ exports.init = (server, corsOptions) => {
         });
 
         console.log(`[BACKEND] Call record created: ${call._id}`);
+        console.log(`[BACKEND] Call saved to database:`, {
+          callId: call._id.toString(),
+          callerId: call.callerId.toString(),
+          receiverId: call.receiverId.toString(),
+          status: call.status,
+          timestamp: call.timestamp
+        });
 
         // Emit incoming call to receiver's USER ROOM ONLY (not conversation room!)
         io.to(receiverId.toString()).emit("voice-call:incoming", {
@@ -221,10 +235,29 @@ exports.init = (server, corsOptions) => {
         const { callId, receiverId } = data;
 
         // Update call status to 'answered'
-        await Call.findByIdAndUpdate(callId, {
-          status: 'answered',
-          startTime: new Date()
-        });
+        const updatedCall = await Call.findByIdAndUpdate(
+          callId,
+          {
+            status: 'answered',
+            startTime: new Date()
+          },
+          { new: true } // Return updated document
+        );
+
+        if (!updatedCall) {
+          console.error(`[BACKEND] Failed to update call ${callId} to answered`);
+          socket.emit("voice-call:error", { message: "Failed to accept call" });
+          return;
+        }
+
+        // Verify the call was saved
+        const savedCall = await Call.findById(callId);
+        if (savedCall) {
+          console.log(`[BACKEND] Call ${callId} saved as answered:`, {
+            status: savedCall.status,
+            timestamp: savedCall.timestamp
+          });
+        }
 
         // Get call to find caller
         const call = await Call.findById(callId);
@@ -239,9 +272,9 @@ exports.init = (server, corsOptions) => {
           callId
         });
 
-        console.log(`Call ${callId} accepted by ${receiverId}`);
+        console.log(`[BACKEND] Call ${callId} accepted by ${receiverId}`);
       } catch (error) {
-        console.error("Error accepting call:", error);
+        console.error("[BACKEND] Error accepting call:", error);
         socket.emit("voice-call:error", { message: "Failed to accept call" });
       }
     });
@@ -251,10 +284,29 @@ exports.init = (server, corsOptions) => {
         const { callId, receiverId } = data;
 
         // Update call status to 'declined'
-        await Call.findByIdAndUpdate(callId, {
-          status: 'declined',
-          endTime: new Date()
-        });
+        const updatedCall = await Call.findByIdAndUpdate(
+          callId,
+          {
+            status: 'declined',
+            endTime: new Date()
+          },
+          { new: true } // Return updated document
+        );
+
+        if (!updatedCall) {
+          console.error(`[BACKEND] Failed to update call ${callId} to declined`);
+          socket.emit("voice-call:error", { message: "Failed to decline call" });
+          return;
+        }
+
+        // Verify the call was saved
+        const savedCall = await Call.findById(callId);
+        if (savedCall) {
+          console.log(`[BACKEND] Call ${callId} saved as declined:`, {
+            status: savedCall.status,
+            timestamp: savedCall.timestamp
+          });
+        }
 
         // Get call to find caller
         const call = await Call.findById(callId);
@@ -264,9 +316,9 @@ exports.init = (server, corsOptions) => {
           callId
         });
 
-        console.log(`Call ${callId} declined by ${receiverId}`);
+        console.log(`[BACKEND] Call ${callId} declined by ${receiverId}`);
       } catch (error) {
-        console.error("Error declining call:", error);
+        console.error("[BACKEND] Error declining call:", error);
         socket.emit("voice-call:error", { message: "Failed to decline call" });
       }
     });
@@ -279,25 +331,46 @@ exports.init = (server, corsOptions) => {
         const call = await Call.findById(callId);
         
         if (!call) {
-          console.error(`Call ${callId} not found`);
+          console.error(`[BACKEND] Call ${callId} not found`);
           return;
         }
 
         // Update call with end time and duration
         // Preserve the status (answered, declined, etc.) - don't overwrite it
-        await Call.findByIdAndUpdate(callId, {
-          endTime: new Date(),
-          duration: duration || 0
-          // Status is already set (answered/declined/missed) - don't change it
-        });
+        const updatedCall = await Call.findByIdAndUpdate(
+          callId,
+          {
+            endTime: new Date(),
+            duration: duration || 0
+            // Status is already set (answered/declined/missed) - don't change it
+          },
+          { new: true } // Return updated document
+        );
+
+        if (!updatedCall) {
+          console.error(`[BACKEND] Failed to update call ${callId}`);
+          return;
+        }
+
+        // Verify the call was saved
+        const savedCall = await Call.findById(callId);
+        if (savedCall) {
+          console.log(`[BACKEND] Call ${callId} saved successfully:`, {
+            status: savedCall.status,
+            duration: savedCall.duration,
+            endTime: savedCall.endTime,
+            timestamp: savedCall.timestamp
+          });
+        }
 
         // Notify both parties
         io.to(call.callerId.toString()).emit("voice-call:ended", { callId });
         io.to(call.receiverId.toString()).emit("voice-call:ended", { callId });
 
-        console.log(`Call ${callId} ended by ${userId}, duration: ${duration}s, status: ${call.status}`);
+        console.log(`[BACKEND] Call ${callId} ended by ${userId}, duration: ${duration}s, status: ${call.status}`);
       } catch (error) {
-        console.error("Error ending call:", error);
+        console.error("[BACKEND] Error ending call:", error);
+        socket.emit("voice-call:error", { message: "Failed to save call to database" });
       }
     });
 
