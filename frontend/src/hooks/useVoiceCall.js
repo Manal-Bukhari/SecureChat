@@ -70,6 +70,8 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
   const encryptionEnabledRef = useRef(false);
   const decryptionFailureCountRef = useRef(0);
   const MAX_DECRYPTION_FAILURES = 3; // Disable encryption after 3 failures
+  const currentBitrateRef = useRef(64000); // Current Opus bitrate in bps
+  const rtpSenderRef = useRef(null); // RTCRtpSender for adaptive parameter adjustment
 
   // Timeout refs (Fix 4)
   const offerTimeoutRef = useRef(null);
@@ -374,36 +376,36 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     }
   }, [decryptMessage, isCryptoInitialized]);
 
-  // Helper function to configure Opus codec in SDP for optimal voice quality
-  const configureOpusCodec = useCallback((sdp) => {
+  // Helper function to configure Opus codec in SDP for optimal voice quality with adaptive bitrate
+  const configureOpusCodec = useCallback((sdp, targetBitrate = 64000) => {
     if (!sdp) return sdp;
     
     try {
-      // Modify SDP to prioritize Opus codec and set optimal parameters
+      // Modify SDP to prioritize Opus codec and set optimal parameters for packet loss resilience
       let modifiedSdp = sdp;
       
-      // Set Opus codec parameters for voice (32-64 kbps, low latency)
+      // Set Opus codec parameters for voice with enhanced FEC and adaptive bitrate
       // Format: a=fmtp:111 minptime=10;useinbandfec=1;stereo=0;sprop-stereo=0;maxaveragebitrate=64000
-      // We'll prioritize Opus and set bitrate to 64kbps for high quality
+      // Enhanced settings for better packet loss handling
       const opusRegex = /a=fmtp:(\d+) (.*)/g;
       modifiedSdp = modifiedSdp.replace(opusRegex, (match, payloadType, params) => {
         // Check if this is Opus (usually payload type 111 or 109)
-        // Add/update Opus parameters for optimal voice quality
+        // Add/update Opus parameters for optimal voice quality with packet loss resilience
         const newParams = [
           'minptime=10', // Minimum packet time (10ms for low latency)
-          'useinbandfec=1', // Use in-band FEC for error recovery
-          'stereo=0', // Mono (sufficient for voice)
+          'useinbandfec=1', // Enable in-band FEC for error recovery (critical for packet loss)
+          'stereo=0', // Mono (sufficient for voice, reduces bandwidth)
           'sprop-stereo=0', // No stereo property
-          'maxaveragebitrate=64000', // 64 kbps for high quality voice
+          `maxaveragebitrate=${targetBitrate}`, // Adaptive bitrate (default 64kbps, can be reduced for poor networks)
           'maxplaybackrate=48000', // 48kHz sample rate
-          'ptime=20' // Packet time 20ms (low latency)
+          'ptime=20', // Packet time 20ms (low latency)
+          'cbr=0', // Use variable bitrate (VBR) for better quality at same bitrate
+          'usedtx=0' // Disable DTX (discontinuous transmission) for consistent quality
         ].join(';');
         return `a=fmtp:${payloadType} ${newParams}`;
       });
       
-      // Ensure Opus is preferred by reordering codecs in SDP
-      // This is a simplified approach - full implementation would parse and reorder m=audio lines
-      console.log('[WEBRTC] Configured Opus codec parameters in SDP');
+      console.log(`[WEBRTC] Configured Opus codec parameters with bitrate: ${targetBitrate} bps for packet loss resilience`);
       return modifiedSdp;
     } catch (err) {
       console.warn('[WEBRTC] Error configuring Opus codec:', err);
@@ -735,10 +737,15 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       const pc = initializePeerConnection();
       console.log('[WEBRTC-CALLER] Peer connection initialized');
 
-      // Add local tracks to peer connection
+      // Add local tracks to peer connection and store RTCRtpSender for adaptive bitrate
       stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream);
-        console.log('[WEBRTC-CALLER] Added track:', track.kind);
+        const sender = pc.addTrack(track, stream);
+        if (track.kind === 'audio' && sender) {
+          rtpSenderRef.current = sender;
+          console.log('[WEBRTC-CALLER] Added track:', track.kind, 'and stored RTCRtpSender');
+        } else {
+          console.log('[WEBRTC-CALLER] Added track:', track.kind);
+        }
       });
 
       // Create and send offer
@@ -747,9 +754,9 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         offerToReceiveVideo: false
       });
       
-      // Configure Opus codec in SDP for optimal voice quality
+      // Configure Opus codec in SDP for optimal voice quality with adaptive bitrate
       if (offer.sdp) {
-        offer.sdp = configureOpusCodec(offer.sdp);
+        offer.sdp = configureOpusCodec(offer.sdp, currentBitrateRef.current);
       }
       
       await pc.setLocalDescription(offer);
@@ -1106,10 +1113,15 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       const pc = initializePeerConnection();
       console.log('[WEBRTC-RECEIVER] Peer connection initialized');
 
-      // Add local tracks to peer connection
+      // Add local tracks to peer connection and store RTCRtpSender for adaptive bitrate
       stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream);
-        console.log('[WEBRTC-RECEIVER] Added track:', track.kind);
+        const sender = pc.addTrack(track, stream);
+        if (track.kind === 'audio' && sender) {
+          rtpSenderRef.current = sender;
+          console.log('[WEBRTC-RECEIVER] Added track:', track.kind, 'and stored RTCRtpSender');
+        } else {
+          console.log('[WEBRTC-RECEIVER] Added track:', track.kind);
+        }
       });
 
       // Fix 2: Set state to offer_received
@@ -1131,9 +1143,9 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       // Create and send answer
       const answer = await pc.createAnswer();
       
-      // Configure Opus codec in SDP for optimal voice quality
+      // Configure Opus codec in SDP for optimal voice quality with adaptive bitrate
       if (answer.sdp) {
-        answer.sdp = configureOpusCodec(answer.sdp);
+        answer.sdp = configureOpusCodec(answer.sdp, currentBitrateRef.current);
       }
       
       await pc.setLocalDescription(answer);
@@ -1430,6 +1442,8 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     pendingCandidatesRef.current = [];
     pendingOfferRef.current = null;
     shouldAnswerRef.current = false;
+    rtpSenderRef.current = null; // Clear RTCRtpSender ref
+    currentBitrateRef.current = 64000; // Reset to default bitrate
   }, [localStream]);
 
   // Socket event listeners
@@ -1547,8 +1561,32 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     const pc = peerConnectionRef.current;
     if (!pc) return;
 
-    // Adaptive quality adjustment function
-    const adjustQualityBasedOnStats = (stats) => {
+    // Adaptive bitrate adjustment function
+    const adjustAudioBitrate = async (targetBitrate) => {
+      if (!rtpSenderRef.current) return;
+      
+      try {
+        const params = rtpSenderRef.current.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          // Create encodings array if it doesn't exist
+          params.encodings = [{}];
+        }
+        
+        // Set bitrate for all encodings
+        params.encodings.forEach(encoding => {
+          encoding.maxBitrate = targetBitrate;
+        });
+        
+        await rtpSenderRef.current.setParameters(params);
+        currentBitrateRef.current = targetBitrate;
+        console.log(`[WEBRTC] Adjusted audio bitrate to ${targetBitrate} bps (${targetBitrate / 1000} kbps)`);
+      } catch (err) {
+        console.warn('[WEBRTC] Failed to adjust audio bitrate:', err);
+      }
+    };
+
+    // Adaptive quality adjustment function with bitrate control
+    const adjustQualityBasedOnStats = async (stats) => {
       const { packetLossPercent, jitter, rtt, availableBitrate } = stats;
       
       // Convert packetLossPercent to number if it's a string
@@ -1556,18 +1594,35 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         ? parseFloat(packetLossPercent) 
         : packetLossPercent;
       
-      // Determine quality level
+      // Determine quality level and target bitrate
       // Only check bitrate if it's available (greater than 0)
       let quality = 'good';
+      let targetBitrate = 64000; // Default: 64 kbps (high quality)
       const hasBitrateInfo = availableBitrate && availableBitrate > 0;
       
-      // Poor quality thresholds
-      if (packetLoss > 10 || jitter > 0.05 || rtt > 0.3 || (hasBitrateInfo && availableBitrate < 32000)) {
+      // Poor quality thresholds - reduce bitrate significantly
+      // More aggressive thresholds: packet loss > 3%, jitter > 20ms, RTT > 150ms
+      if (packetLoss > 3 || jitter > 0.02 || rtt > 0.15 || (hasBitrateInfo && availableBitrate < 32000)) {
         quality = 'poor';
+        // Reduce bitrate to 32 kbps for poor connections (better packet loss resilience)
+        targetBitrate = 32000;
       } 
-      // Fair quality thresholds
-      else if (packetLoss > 5 || jitter > 0.03 || rtt > 0.2 || (hasBitrateInfo && availableBitrate < 48000)) {
+      // Fair quality thresholds - reduce bitrate moderately
+      // Moderate thresholds: packet loss > 1.5%, jitter > 10ms, RTT > 100ms
+      else if (packetLoss > 1.5 || jitter > 0.01 || rtt > 0.1 || (hasBitrateInfo && availableBitrate < 48000)) {
         quality = 'fair';
+        // Reduce bitrate to 48 kbps for fair connections
+        targetBitrate = 48000;
+      }
+      // Good quality - use high bitrate
+      else {
+        quality = 'good';
+        targetBitrate = 64000; // 64 kbps for good connections
+      }
+      
+      // Adjust bitrate if it has changed
+      if (currentBitrateRef.current !== targetBitrate) {
+        await adjustAudioBitrate(targetBitrate);
       }
       
       setConnectionQuality(quality);
@@ -1578,13 +1633,11 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         if (audioTrack && audioTrack.getSettings) {
           // Adjust audio constraints based on network quality
           if (quality === 'poor') {
-            // Reduce quality for poor connections
-            console.log('[WEBRTC] Poor connection detected, optimizing for stability');
-            // Note: Most constraints are set at track creation, but we can log for monitoring
+            console.log('[WEBRTC] Poor connection detected, optimizing for stability - reduced bitrate');
           } else if (quality === 'fair') {
-            console.log('[WEBRTC] Fair connection, maintaining balanced quality');
+            console.log('[WEBRTC] Fair connection, maintaining balanced quality - moderate bitrate');
           } else {
-            console.log('[WEBRTC] Good connection, maintaining high quality');
+            console.log('[WEBRTC] Good connection, maintaining high quality - full bitrate');
           }
         }
       }
@@ -1658,9 +1711,24 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
           quality: 'good' // Will be set by adjustQualityBasedOnStats
         };
 
-        // Adjust quality based on stats
-        const quality = adjustQualityBasedOnStats(enhancedStats);
-        enhancedStats.quality = quality;
+        // Adjust quality based on stats (async - adjusts bitrate dynamically)
+        adjustQualityBasedOnStats(enhancedStats).then(quality => {
+          enhancedStats.quality = quality;
+          // Update stats with new quality
+          setConnectionStats({ ...enhancedStats, quality });
+        }).catch(err => {
+          console.error('[WEBRTC] Error adjusting quality:', err);
+          // Set quality based on metrics if async call fails (matching thresholds from adjustQualityBasedOnStats)
+          const estimatedQuality = enhancedStats.packetLossPercent > 3 || enhancedStats.rtt > 0.15 ? 'poor' 
+            : enhancedStats.packetLossPercent > 1.5 || enhancedStats.rtt > 0.1 ? 'fair' : 'good';
+          enhancedStats.quality = estimatedQuality;
+        });
+        
+        // Set quality immediately for display (will be updated by async function)
+        // Use same thresholds as adjustQualityBasedOnStats for consistency
+        const estimatedQuality = enhancedStats.packetLossPercent > 3 || enhancedStats.rtt > 0.15 ? 'poor' 
+          : enhancedStats.packetLossPercent > 1.5 || enhancedStats.rtt > 0.1 ? 'fair' : 'good';
+        enhancedStats.quality = estimatedQuality;
 
         setConnectionStats(enhancedStats);
 
@@ -1681,7 +1749,7 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       } catch (err) {
         console.error('[WEBRTC] Error getting stats:', err);
       }
-    }, 3000); // Check every 3 seconds for more responsive quality adjustments
+    }, 2000); // Check every 2 seconds for more responsive quality adjustments
 
     return () => clearInterval(interval);
   }, [webrtcState, localStream]);
