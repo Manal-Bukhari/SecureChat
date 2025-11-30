@@ -1487,18 +1487,28 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     const handleReconnect = () => {
       console.log('[WEBRTC] Socket reconnected during voice call');
       
-      // If there's an active call during reconnection, log warning
+      // If there's an active call during reconnection, log the state but DON'T clear keys
+      // Keys are still valid - reconnection is just a network event, not a cryptographic event
       if (callId && (webrtcState !== 'idle' && webrtcState !== 'ended')) {
-        console.warn('[WEBRTC] Active call detected during reconnection:', {
+        console.log('[WEBRTC] Active call detected during reconnection:', {
           callId,
           state: webrtcState,
           isInitiator,
           receiverId,
-          callerId
+          callerId,
+          message: 'Keys remain valid - no cache clearing needed'
         });
         
-        // Note: Room rejoining is handled by ChatPage's reconnection handler
-        // This is just for logging and potential future retry logic
+        // Note: Keys should NOT be cleared on reconnection because:
+        // 1. Keys are derived from public keys which don't change
+        // 2. Clearing cache causes key mismatch between caller/receiver
+        // 3. The retry logic in cryptoService.js already handles actual key mismatches
+        // 4. Reconnection is a network event, not a cryptographic event
+        
+        // Room rejoining is handled by ChatPage's reconnection handler
+        // Encryption keys remain cached and will be reused automatically
+      } else {
+        console.log('[WEBRTC] Reconnection detected but no active call - state:', webrtcState);
       }
     };
 

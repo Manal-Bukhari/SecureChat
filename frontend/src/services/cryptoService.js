@@ -86,6 +86,29 @@ class CryptoService {
   }
 
   /**
+   * Clear shared key cache for a specific user
+   * Useful when keys need to be refreshed (e.g., after reconnection)
+   */
+  clearSharedKeyCache(userId) {
+    if (this.sharedKeys.has(userId)) {
+      console.log(`🗑️ Clearing shared key cache for user: ${userId}`);
+      this.sharedKeys.delete(userId);
+    }
+  }
+
+  /**
+   * Clear all shared key cache
+   * Useful when all keys need to be refreshed (e.g., after reconnection)
+   */
+  clearAllSharedKeyCache() {
+    const count = this.sharedKeys.size;
+    if (count > 0) {
+      console.log(`🗑️ Clearing all shared key cache (${count} keys)`);
+      this.sharedKeys.clear();
+    }
+  }
+
+  /**
    * Derive shared secret key from other user's public key
    */
   async deriveSharedKey(otherUserPublicKeyBase64, userId) {
@@ -437,46 +460,71 @@ class CryptoService {
       const sharedKey = await this.deriveSharedKey(otherUserPublicKey, userId);
       return await this.decryptMessage(encryptedData, sharedKey);
     } catch (error) {
-      // Determine if this is a format/validation error (don't retry) or a decryption error (retry once)
-      const isFormatError = error.message && (
-        error.message.includes('Invalid') || 
-        error.message.includes('Missing') ||
+      // CRITICAL: Check for OperationError FIRST - this indicates key mismatch, not format error
+      // OperationError from Web Crypto API means: wrong key, corrupted ciphertext, or auth tag mismatch
+      const isOperationError = error.name === 'OperationError' || 
+                               (error.message && (
+                                 error.message.includes('Wrong key') ||
+                                 error.message.includes('authentication failure') ||
+                                 (error.message.includes('Decryption failed') && 
+                                  (error.message.includes('different key') || error.message.includes('Wrong key'))
+                                 )
+                               ));
+      
+      // Check for actual format errors (only for errors that happen BEFORE decryption attempt)
+      // Format errors are things like missing fields, invalid structure, etc.
+      // Don't confuse "corrupted data" in OperationError message with format errors
+      const isActualFormatError = !isOperationError && error.message && (
+        error.message.includes('Invalid encrypted data format') ||
+        error.message.includes('Missing required encryption fields') ||
         error.message.includes('too short') ||
-        error.message.includes('corrupted') ||
-        error.message.includes('format')
+        error.message.includes('must be an object') ||
+        error.message.includes('cannot parse as JSON') ||
+        error.message.includes('Invalid base64') ||
+        error.message.includes('Invalid IV length') ||
+        error.message.includes('Invalid auth tag length')
       );
       
-      if (isFormatError) {
+      if (isActualFormatError) {
         // Format/validation error - don't retry, data is clearly invalid
-        console.warn(`⚠️ Skipping retry for user ${userId}: Invalid data format detected`);
+        console.warn(`⚠️ Skipping retry for user ${userId}: Invalid data format detected`, {
+          errorName: error.name,
+          errorMessage: error.message
+        });
         throw error;
       }
       
-      // If decryption fails, clear cache and retry ONCE
+      // If OperationError (key mismatch), clear cache and retry ONCE
       // This handles cases where the key might have changed or cache is stale
-      console.warn(`⚠️ Initial decryption failed for user ${userId}. Clearing cache and retrying.`);
-      this.sharedKeys.delete(userId);
-      
-      try {
-        const retryKey = await this.deriveSharedKey(otherUserPublicKey, userId);
-        return await this.decryptMessage(encryptedData, retryKey);
-      } catch (retryError) {
-        // Check if retry also failed due to format error
-        const retryIsFormatError = retryError.message && (
-          retryError.message.includes('Invalid') || 
-          retryError.message.includes('Missing') ||
-          retryError.message.includes('too short') ||
-          retryError.message.includes('corrupted') ||
-          retryError.message.includes('format')
-        );
+      if (isOperationError) {
+        console.warn(`⚠️ Decryption failed (OperationError - likely key mismatch) for user ${userId}. Clearing cache and retrying with fresh key.`, {
+          errorName: error.name,
+          errorMessage: error.message
+        });
         
-        if (retryIsFormatError) {
-          // Format error on retry - data is definitely invalid
+        // Clear shared key cache to force re-derivation
+        this.sharedKeys.delete(userId);
+        
+        try {
+          // Re-derive key with fresh derivation using the same public key
+          const retryKey = await this.deriveSharedKey(otherUserPublicKey, userId);
+          console.log(`🔄 Retrying decryption with fresh key for user: ${userId}`);
+          return await this.decryptMessage(encryptedData, retryKey);
+        } catch (retryError) {
+          // If retry also fails with OperationError, it's likely a permanent key mismatch
+          if (retryError.name === 'OperationError' || 
+              (retryError.message && retryError.message.includes('Wrong key'))) {
+            console.error(`❌ Retry failed - permanent key mismatch for user ${userId}. Public key may be outdated.`);
+          }
           throw retryError;
         }
-        
-        // Decryption error on retry - likely an old message with different keys
-        throw retryError;
+      } else {
+        // Other errors - log and throw
+        console.error(`❌ Decryption failed (unknown error) for user ${userId}:`, {
+          errorName: error.name,
+          errorMessage: error.message
+        });
+        throw error;
       }
     }
   }
