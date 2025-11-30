@@ -70,41 +70,82 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
   // Helper function to encrypt signaling data
   const encryptSignalingData = useCallback(async (data, recipientId) => {
     try {
-      if (!isCryptoInitialized) {
-        console.warn('[ENCRYPTION] Crypto not initialized, sending unencrypted');
+      // If crypto is not initialized but we have a recipient, try to enable encryption
+      if (!isCryptoInitialized && recipientId) {
+        console.log('[ENCRYPTION] Crypto not initialized, attempting to enable encryption...');
+        // Try to get recipient key to enable encryption
+        try {
+          const recipientKey = await getUserPublicKey(recipientId);
+          recipientPublicKeyRef.current = recipientKey;
+          encryptionEnabledRef.current = true;
+          setIsEncrypted(true);
+          console.log('[ENCRYPTION] Encryption enabled during encryption attempt');
+        } catch (keyErr) {
+          console.warn('[ENCRYPTION] Could not get recipient key:', keyErr.message);
+          // Still try encryption if crypto service is ready
+        }
+      }
+
+      // Only skip encryption if explicitly disabled AND crypto is not initialized
+      if (!encryptionEnabledRef.current && !isCryptoInitialized) {
+        console.warn('[ENCRYPTION] Crypto not initialized and encryption disabled, sending unencrypted');
         return { encrypted: false, data };
       }
 
-      if (!encryptionEnabledRef.current) {
-        console.warn('[ENCRYPTION] Encryption disabled, sending unencrypted');
-        return { encrypted: false, data };
+      // If encryption is enabled or crypto is initialized, try to encrypt
+      if (encryptionEnabledRef.current || isCryptoInitialized) {
+        // Serialize the data to JSON string
+        const jsonString = JSON.stringify(data);
+        
+        // Encrypt using the crypto service
+        const encrypted = await encryptMessage(jsonString, recipientId);
+        
+        // Successfully encrypted - ensure encryption is marked as enabled
+        encryptionEnabledRef.current = true;
+        setIsEncrypted(true);
+        
+        return {
+          encrypted: true,
+          encryptedData: encrypted,
+          isEncrypted: true
+        };
       }
 
-      // Serialize the data to JSON string
-      const jsonString = JSON.stringify(data);
-      
-      // Encrypt using the crypto service
-      const encrypted = await encryptMessage(jsonString, recipientId);
-      
-      return {
-        encrypted: true,
-        encryptedData: encrypted,
-        isEncrypted: true
-      };
+      // Fallback to unencrypted only if we really can't encrypt
+      console.warn('[ENCRYPTION] Encryption not available, sending unencrypted');
+      return { encrypted: false, data };
     } catch (err) {
       console.error('[ENCRYPTION] Failed to encrypt signaling data:', err);
-      // Fallback to unencrypted if encryption fails
+      // Only fallback to unencrypted if it's a critical error
+      // If it's just a key issue, we might want to retry
+      if (err.message && err.message.includes('not set up encryption')) {
+        // Recipient doesn't have encryption set up - must send unencrypted
+        encryptionEnabledRef.current = false;
+        setIsEncrypted(false);
+        return { encrypted: false, data, encryptionError: err.message };
+      }
+      // For other errors, still try to send unencrypted but log the error
       return { encrypted: false, data, encryptionError: err.message };
     }
-  }, [encryptMessage, isCryptoInitialized]);
+  }, [encryptMessage, isCryptoInitialized, getUserPublicKey]);
 
   // Helper function to decrypt signaling data
   const decryptSignalingData = useCallback(async (encryptedPayload, senderId) => {
     try {
-      // Check if payload is encrypted
-      if (!encryptedPayload.isEncrypted || !encryptedPayload.encryptedData) {
-        // Legacy unencrypted format
-        return encryptedPayload.offer || encryptedPayload.answer || encryptedPayload.candidate;
+      // Check if payload is encrypted (check both isEncrypted and encrypted properties)
+      const isEncrypted = encryptedPayload.isEncrypted || (encryptedPayload.encrypted === true);
+      
+      if (!isEncrypted || !encryptedPayload.encryptedData) {
+        // Unencrypted format - handle multiple formats:
+        // 1. Legacy format: { offer: {...} } or { answer: {...} } or { candidate: {...} }
+        // 2. encryptSignalingData fallback: { encrypted: false, data: {...} }
+        // 3. Direct format: the payload itself if it has type/sdp or candidate properties
+        const unencryptedData = encryptedPayload.offer || 
+                                encryptedPayload.answer || 
+                                encryptedPayload.candidate || 
+                                (encryptedPayload.data && (encryptedPayload.encrypted === false || !encryptedPayload.encrypted) ? encryptedPayload.data : null) ||
+                                encryptedPayload;
+        return unencryptedData;
       }
 
       if (!isCryptoInitialized) {
@@ -292,26 +333,64 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       console.log('[WEBRTC-CALLER] Starting call as initiator...');
       console.log('[WEBRTC-CALLER] Call params:', { callId, callerId, receiverId });
 
-      // Check if encryption is available
+      // Check if encryption is available - be more aggressive about enabling it
       let encryptionAvailable = false;
-      if (isCryptoInitialized && receiverId) {
+      
+      // First, ensure crypto is initialized
+      if (!isCryptoInitialized && receiverId) {
+        console.log('[ENCRYPTION] Crypto not initialized, attempting to initialize...');
+        // Note: initializeCrypto is not directly available, but it should auto-initialize
+        // We'll proceed and let encryptSignalingData handle it
+      }
+      
+      // Try to enable encryption if we have a receiver ID
+      if (receiverId) {
         try {
-          const recipientKey = await getUserPublicKey(receiverId);
-          recipientPublicKeyRef.current = recipientKey;
-          encryptionEnabledRef.current = true;
-          encryptionAvailable = true;
-          setIsEncrypted(true);
-          console.log('[ENCRYPTION] Encryption enabled for call');
+          // Try to get recipient's public key (with retry logic)
+          let recipientKey = null;
+          let retries = 2;
+          let lastError = null;
+          
+          while (retries > 0 && !recipientKey) {
+            try {
+              recipientKey = await getUserPublicKey(receiverId);
+              recipientPublicKeyRef.current = recipientKey;
+              encryptionEnabledRef.current = true;
+              encryptionAvailable = true;
+              setIsEncrypted(true);
+              console.log('[ENCRYPTION] Encryption enabled for call');
+              break;
+            } catch (err) {
+              lastError = err;
+              retries--;
+              if (retries > 0) {
+                console.log(`[ENCRYPTION] Retrying to get public key (${retries} retries left)...`);
+                await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms before retry
+              }
+            }
+          }
+          
+          if (!recipientKey) {
+            console.warn('[ENCRYPTION] Could not get recipient public key after retries:', lastError?.message);
+            // Don't disable encryption yet - let encryptSignalingData try to handle it
+            // It might be a transient network issue, and we want encryption if possible
+            encryptionEnabledRef.current = isCryptoInitialized; // Enable if crypto is ready
+            if (isCryptoInitialized) {
+              console.log('[ENCRYPTION] Crypto initialized but public key unavailable, will attempt encryption anyway');
+            }
+          }
         } catch (err) {
-          console.warn('[ENCRYPTION] Recipient encryption not available:', err.message);
-          encryptionEnabledRef.current = false;
-          setIsEncrypted(false);
-          // Show user-friendly warning (non-blocking)
-          toast('Encryption unavailable: Recipient has not set up encryption. Call will proceed unencrypted.', {
-            icon: '⚠️',
-            duration: 4000
-          });
+          console.warn('[ENCRYPTION] Error setting up encryption:', err.message);
+          // Only disable if crypto is definitely not available
+          if (!isCryptoInitialized) {
+            encryptionEnabledRef.current = false;
+            setIsEncrypted(false);
+          }
         }
+      } else {
+        console.warn('[ENCRYPTION] No receiverId provided, encryption disabled');
+        encryptionEnabledRef.current = false;
+        setIsEncrypted(false);
       }
 
       // Fix 2: Set state to getting_media
@@ -421,49 +500,161 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         // Determine sender ID from the payload (the caller)
         const senderId = offerPayloadToUse.from || receiverId;
         
-        // Check if encryption was used
-        if (offerPayloadToUse.isEncrypted) {
-          // Try to enable encryption for the answer too
+        // Check if encryption was used (check both isEncrypted and encrypted properties)
+        const isEncrypted = offerPayloadToUse.isEncrypted || (offerPayloadToUse.encrypted === true);
+        
+        // If marked as encrypted but encryptedData is missing, treat as unencrypted
+        if (isEncrypted && !offerPayloadToUse.encryptedData) {
+          console.warn('[ENCRYPTION] Payload marked as encrypted but encryptedData is missing, treating as unencrypted');
+        }
+        
+        if (isEncrypted && offerPayloadToUse.encryptedData) {
+          // Try to enable encryption for the answer too - be more aggressive
           try {
-            if (isCryptoInitialized && senderId) {
+            // Try to get caller's public key (with retry)
+            let callerKey = null;
+            let retries = 2;
+            
+            while (retries > 0 && !callerKey && senderId) {
+              try {
+                callerKey = await getUserPublicKey(senderId);
+                recipientPublicKeyRef.current = callerKey;
+                encryptionEnabledRef.current = true;
+                setIsEncrypted(true);
+                console.log('[ENCRYPTION] Encryption enabled for answer');
+                break;
+              } catch (keyErr) {
+                retries--;
+                if (retries > 0) {
+                  console.log(`[ENCRYPTION] Retrying to get caller public key (${retries} retries left)...`);
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                } else {
+                  console.warn('[ENCRYPTION] Could not get caller public key after retries:', keyErr.message);
+                  // If crypto is initialized, still try to enable encryption
+                  if (isCryptoInitialized) {
+                    encryptionEnabledRef.current = true;
+                    console.log('[ENCRYPTION] Crypto initialized, enabling encryption anyway');
+                  }
+                }
+              }
+            }
+            
+            // If we still don't have the key but crypto is initialized, enable encryption
+            if (!callerKey && isCryptoInitialized) {
+              encryptionEnabledRef.current = true;
+              setIsEncrypted(true);
+              console.log('[ENCRYPTION] Encryption enabled (crypto ready, will fetch key when needed)');
+            }
+          } catch (keyErr) {
+            console.warn('[ENCRYPTION] Error enabling encryption for answer:', keyErr);
+            // Only disable if crypto is definitely not available
+            if (!isCryptoInitialized) {
+              encryptionEnabledRef.current = false;
+              setIsEncrypted(false);
+            } else {
+              // Crypto is initialized, so enable encryption
+              encryptionEnabledRef.current = true;
+              setIsEncrypted(true);
+            }
+          }
+          
+          try {
+            offerToUse = await decryptSignalingData(offerPayloadToUse, senderId);
+            
+            // Create RTCSessionDescription from decrypted data
+            if (offerToUse && offerToUse.type && offerToUse.sdp) {
+              offerToUse = new RTCSessionDescription(offerToUse);
+              console.log('[ENCRYPTION] Decrypted offer successfully');
+            } else {
+              // Decryption returned something unexpected, try fallback
+              console.warn('[ENCRYPTION] Decryption returned unexpected format, trying fallback');
+              throw new Error('Invalid offer format after decryption');
+            }
+          } catch (decryptInnerErr) {
+            console.error('[ENCRYPTION] Inner decryption error, trying fallback:', decryptInnerErr);
+            // Try to extract offer from payload structure as fallback
+            const fallbackOffer = offerPayloadToUse.offer || offerPayloadToUse.data || 
+                                 (offerPayloadToUse.type && offerPayloadToUse.sdp ? offerPayloadToUse : null);
+            if (fallbackOffer && fallbackOffer.type && fallbackOffer.sdp) {
+              offerToUse = new RTCSessionDescription(fallbackOffer);
+              setIsEncrypted(false);
+              encryptionEnabledRef.current = false;
+              toast('Received unencrypted call. Encryption may not be available.', {
+                icon: '⚠️',
+                duration: 3000
+              });
+            } else {
+              throw decryptInnerErr; // Re-throw if no fallback available
+            }
+          }
+        } else {
+          // Unencrypted offer - handle multiple formats:
+          // 1. Legacy format: { offer: {...} }
+          // 2. encryptSignalingData fallback: { encrypted: false, data: {...} }
+          // 3. Direct format: { type: 'offer', sdp: '...' }
+          let offerObj = null;
+          
+          if (offerPayloadToUse.offer) {
+            // Legacy format with 'offer' property
+            offerObj = offerPayloadToUse.offer;
+          } else if (offerPayloadToUse.data && (offerPayloadToUse.encrypted === false || !offerPayloadToUse.encrypted)) {
+            // Format from encryptSignalingData when encryption is disabled
+            offerObj = offerPayloadToUse.data;
+          } else if (offerPayloadToUse.type && offerPayloadToUse.sdp) {
+            // Direct format
+            offerObj = offerPayloadToUse;
+          }
+          
+          if (offerObj && offerObj.type && offerObj.sdp) {
+            offerToUse = new RTCSessionDescription(offerObj);
+            console.log('[WEBRTC-RECEIVER] Using unencrypted offer format');
+          } else {
+            console.error('[WEBRTC-RECEIVER] Invalid unencrypted offer format. Payload structure:', {
+              hasOffer: !!offerPayloadToUse.offer,
+              hasData: !!offerPayloadToUse.data,
+              hasType: !!offerPayloadToUse.type,
+              hasSdp: !!offerPayloadToUse.sdp,
+              isEncrypted: offerPayloadToUse.isEncrypted,
+              encrypted: offerPayloadToUse.encrypted,
+              hasEncryptedData: !!offerPayloadToUse.encryptedData,
+              payloadKeys: Object.keys(offerPayloadToUse),
+              offerObj: offerObj
+            });
+            throw new Error('Invalid unencrypted offer format');
+          }
+          // Even if offer is unencrypted, try to enable encryption for the answer if possible
+          if (isCryptoInitialized && senderId) {
+            try {
               const callerKey = await getUserPublicKey(senderId);
               recipientPublicKeyRef.current = callerKey;
               encryptionEnabledRef.current = true;
               setIsEncrypted(true);
-              console.log('[ENCRYPTION] Encryption enabled for answer');
+              console.log('[ENCRYPTION] Received unencrypted offer but enabled encryption for answer');
+            } catch (keyErr) {
+              console.warn('[ENCRYPTION] Could not enable encryption for answer:', keyErr.message);
+              encryptionEnabledRef.current = false;
+              setIsEncrypted(false);
             }
-          } catch (keyErr) {
-            console.warn('[ENCRYPTION] Could not enable encryption for answer:', keyErr);
-            encryptionEnabledRef.current = false;
+          } else {
             setIsEncrypted(false);
+            encryptionEnabledRef.current = false;
           }
-          
-          offerToUse = await decryptSignalingData(offerPayloadToUse, senderId);
-          
-          // Create RTCSessionDescription from decrypted data
-          if (offerToUse.type && offerToUse.sdp) {
-            offerToUse = new RTCSessionDescription(offerToUse);
-          } else {
-            throw new Error('Invalid offer format after decryption');
-          }
-          
-          console.log('[ENCRYPTION] Decrypted offer successfully');
-        } else {
-          // Unencrypted offer - handle both object and RTCSessionDescription
-          const offerObj = offerPayloadToUse.offer || offerPayloadToUse;
-          if (offerObj.type && offerObj.sdp) {
-            offerToUse = new RTCSessionDescription(offerObj);
-          } else {
-            throw new Error('Invalid unencrypted offer format');
-          }
-          setIsEncrypted(false);
-          encryptionEnabledRef.current = false;
         }
       } catch (decryptErr) {
         console.error('[ENCRYPTION] Failed to decrypt offer:', decryptErr);
-        // Try to use unencrypted format
+        // Try to use unencrypted format as fallback
+        let fallbackOffer = null;
+        
         if (offerPayloadToUse.offer) {
-          offerToUse = new RTCSessionDescription(offerPayloadToUse.offer);
+          fallbackOffer = offerPayloadToUse.offer;
+        } else if (offerPayloadToUse.data) {
+          fallbackOffer = offerPayloadToUse.data;
+        } else if (offerPayloadToUse.type && offerPayloadToUse.sdp) {
+          fallbackOffer = offerPayloadToUse;
+        }
+        
+        if (fallbackOffer && fallbackOffer.type && fallbackOffer.sdp) {
+          offerToUse = new RTCSessionDescription(fallbackOffer);
           setIsEncrypted(false);
           toast('Received unencrypted call. Encryption may not be available.', {
             icon: '⚠️',
@@ -587,15 +778,27 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
           throw new Error('Invalid answer format after decryption');
         }
         
-        // Check if encryption was used
-        if (encryptedAnswerPayload.isEncrypted) {
+        // Check if encryption was used (check both isEncrypted and encrypted properties)
+        const isEncrypted = encryptedAnswerPayload.isEncrypted || (encryptedAnswerPayload.encrypted === true);
+        if (isEncrypted) {
           setIsEncrypted(true);
           console.log('[ENCRYPTION] Decrypted answer successfully');
+        } else {
+          setIsEncrypted(false);
         }
       } catch (decryptErr) {
         console.error('[ENCRYPTION] Failed to decrypt answer:', decryptErr);
-        // Try to use unencrypted format
-        const answerObj = encryptedAnswerPayload.answer || encryptedAnswerPayload;
+        // Try to use unencrypted format - handle multiple formats
+        let answerObj = null;
+        
+        if (encryptedAnswerPayload.answer) {
+          answerObj = encryptedAnswerPayload.answer;
+        } else if (encryptedAnswerPayload.data && (encryptedAnswerPayload.encrypted === false || !encryptedAnswerPayload.encrypted)) {
+          answerObj = encryptedAnswerPayload.data;
+        } else if (encryptedAnswerPayload.type && encryptedAnswerPayload.sdp) {
+          answerObj = encryptedAnswerPayload;
+        }
+        
         if (answerObj && answerObj.type && answerObj.sdp) {
           answer = new RTCSessionDescription(answerObj);
           setIsEncrypted(false);
@@ -663,14 +866,19 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       // Decrypt candidate if encrypted
       let candidateData;
       try {
-        if (encryptedCandidatePayload.isEncrypted && encryptedCandidatePayload.encryptedData) {
+        // Check if encryption was used (check both isEncrypted and encrypted properties)
+        const isEncrypted = encryptedCandidatePayload.isEncrypted || (encryptedCandidatePayload.encrypted === true);
+        
+        if (isEncrypted && encryptedCandidatePayload.encryptedData) {
           // Determine sender ID from the payload
           const senderId = encryptedCandidatePayload.from || receiverId;
           // decryptSignalingData already returns parsed object
           candidateData = await decryptSignalingData(encryptedCandidatePayload, senderId);
         } else {
-          // Unencrypted format
-          candidateData = encryptedCandidatePayload.candidate || encryptedCandidatePayload;
+          // Unencrypted format - handle multiple formats
+          candidateData = encryptedCandidatePayload.candidate || 
+                         (encryptedCandidatePayload.data && (encryptedCandidatePayload.encrypted === false || !encryptedCandidatePayload.encrypted) ? encryptedCandidatePayload.data : null) ||
+                         encryptedCandidatePayload;
         }
 
         // Validate candidate data before creating RTCIceCandidate
@@ -699,8 +907,10 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         }
       } catch (decryptErr) {
         console.error('[ENCRYPTION] Failed to decrypt ICE candidate:', decryptErr);
-        // Try unencrypted format as fallback
-        const fallbackData = encryptedCandidatePayload.candidate || encryptedCandidatePayload;
+        // Try unencrypted format as fallback - handle multiple formats
+        const fallbackData = encryptedCandidatePayload.candidate || 
+                            (encryptedCandidatePayload.data ? encryptedCandidatePayload.data : null) ||
+                            encryptedCandidatePayload;
         if (fallbackData && fallbackData.candidate) {
           try {
             const candidate = new RTCIceCandidate(fallbackData);
