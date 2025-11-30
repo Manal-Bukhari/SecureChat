@@ -118,6 +118,11 @@ export default function ChatPage() {
           setActiveId(params.id);
           dispatch(setSelectedGroup(group));
           dispatch(setSelectedContact(null));
+          // Only set view=groups if no view is explicitly set (allow user to switch tabs)
+          const currentView = searchParams.get('view');
+          if (!currentView) {
+            setSearchParams({ view: 'groups' }, { replace: true });
+          }
         }
       } else {
         const contact = contacts.find(c => c.id === params.id);
@@ -125,6 +130,11 @@ export default function ChatPage() {
           setActiveId(params.id);
           dispatch(setSelectedContact(contact));
           dispatch(setSelectedGroup(null));
+          // Only set view=messages if no view is explicitly set (allow user to switch tabs)
+          const currentView = searchParams.get('view');
+          if (!currentView) {
+            setSearchParams({ view: 'messages' }, { replace: true });
+          }
         }
       }
     } else if (location.state?.activeConversation) {
@@ -679,7 +689,7 @@ export default function ChatPage() {
       setActiveId(contactId);
       dispatch(setSelectedGroup(group));
       dispatch(setSelectedContact(null));
-      navigate(`/chat/group/${contactId}?view=messages`, { replace: true });
+      navigate(`/chat/group/${contactId}?view=groups`, { replace: true });
     } else if (contact) {
       setActiveId(contactId);
       dispatch(setSelectedContact(contact));
