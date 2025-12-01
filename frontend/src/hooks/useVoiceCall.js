@@ -618,6 +618,7 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
 
       // Log structure for debugging
       console.log('[ENCRYPTION] Attempting to decrypt:', {
+        senderId,
         hasCiphertext: !!encryptedDataToUse.ciphertext,
         hasIv: !!encryptedDataToUse.iv,
         hasAuthTag: !!encryptedDataToUse.authTag,
@@ -626,7 +627,13 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         authTagLength: encryptedDataToUse.authTag?.length
       });
 
+      // Validate senderId before attempting decryption
+      if (!senderId) {
+        throw new Error('Sender ID is required for decryption');
+      }
+
       // Decrypt using the crypto service
+      console.log('[ENCRYPTION] Calling decryptMessage with senderId:', senderId);
       const decryptedJson = await decryptMessage(encryptedDataToUse, senderId);
       
       // Parse JSON back to object
@@ -1474,7 +1481,19 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       let offerToUse;
       try {
         // Determine sender ID from the payload (the caller)
-        const senderId = offerPayloadToUse.from || receiverId;
+        // If 'from' is missing, use callerId as fallback since we're the receiver
+        const senderId = offerPayloadToUse.from || callerId;
+        
+        // Validate senderId is available
+        if (!senderId) {
+          throw new Error('Cannot determine sender ID for decryption: both "from" field and callerId are missing');
+        }
+        
+        console.log('[WEBRTC-RECEIVER] Decrypting offer from sender:', senderId, {
+          hasFromField: !!offerPayloadToUse.from,
+          callerId,
+          receiverId
+        });
         
         // Check if encryption was used (check both isEncrypted and encrypted properties)
         const isEncrypted = offerPayloadToUse.isEncrypted || (offerPayloadToUse.encrypted === true);
@@ -1857,7 +1876,25 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       // Decrypt answer if encrypted
       let answer;
       // Determine sender ID from the payload (the receiver who sent the answer)
+      // If 'from' is missing, use receiverId as fallback since we're the caller receiving the answer
       const senderId = encryptedAnswerPayload.from || receiverId;
+      
+      // Validate senderId is available
+      if (!senderId) {
+        console.error('[WEBRTC-CALLER] Cannot determine sender ID for answer decryption:', {
+          hasFromField: !!encryptedAnswerPayload.from,
+          receiverId,
+          callerId
+        });
+        throw new Error('Cannot determine sender ID for decryption: both "from" field and receiverId are missing');
+      }
+      
+      console.log('[WEBRTC-CALLER] Decrypting answer from sender:', senderId, {
+        hasFromField: !!encryptedAnswerPayload.from,
+        receiverId,
+        callerId
+      });
+      
       const decryptedAnswer = await decryptSignalingData(encryptedAnswerPayload, senderId);
       
       // If decryption succeeded and returned valid data
@@ -1987,7 +2024,41 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         // Try to decrypt
         try {
           // Determine sender ID from the payload
-          const senderId = encryptedCandidatePayload.from || receiverId;
+          // If 'from' is missing, infer from 'to' field or use isInitiator to determine sender
+          let senderId = encryptedCandidatePayload.from;
+          if (!senderId) {
+            // If 'to' field exists, the sender is the opposite party
+            if (encryptedCandidatePayload.to === receiverId) {
+              senderId = callerId; // We're receiver, sender is caller
+            } else if (encryptedCandidatePayload.to === callerId) {
+              senderId = receiverId; // We're caller, sender is receiver
+            } else {
+              // Fallback: use isInitiator to determine
+              senderId = isInitiator ? receiverId : callerId;
+            }
+          }
+          
+          // Validate senderId is available
+          if (!senderId) {
+            console.error('[WEBRTC] Cannot determine sender ID for ICE candidate decryption:', {
+              hasFromField: !!encryptedCandidatePayload.from,
+              hasToField: !!encryptedCandidatePayload.to,
+              toValue: encryptedCandidatePayload.to,
+              receiverId,
+              callerId,
+              isInitiator
+            });
+            throw new Error('Cannot determine sender ID for ICE candidate decryption');
+          }
+          
+          console.log('[WEBRTC] Decrypting ICE candidate from sender:', senderId, {
+            hasFromField: !!encryptedCandidatePayload.from,
+            hasToField: !!encryptedCandidatePayload.to,
+            isInitiator,
+            receiverId,
+            callerId
+          });
+          
           // decryptSignalingData returns parsed object or null on failure
           candidateData = await decryptSignalingData(encryptedCandidatePayload, senderId);
           
