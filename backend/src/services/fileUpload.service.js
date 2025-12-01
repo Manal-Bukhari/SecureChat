@@ -21,7 +21,12 @@ class FileUploadService {
     }
 
     if (!this.bucketName) {
-      throw new Error('S3 bucket name not configured');
+      throw new Error('S3 bucket name not configured. Please set S3_BUCKET_NAME in environment variables.');
+    }
+
+    // Check if AWS credentials are configured
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+      throw new Error('AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in environment variables.');
     }
 
     const fileId = uuidv4();
@@ -33,7 +38,6 @@ class FileUploadService {
       Key: fileKey,
       Expires: 300, // 5 minutes
       ContentType: mimeType,
-      ContentLength: fileSize,
       Metadata: {
         'user-id': userId.toString(),
         'file-id': fileId,

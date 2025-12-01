@@ -761,6 +761,7 @@ export default function ChatPage() {
             onForwardMessage={handleForwardMessage}
             currentUserName={user?.name || user?.fullName}
             isGroupChat={false}
+            conversationId={activeId}
           />
         ) : (
           <EmptyChatState currentUserId={user?.id} />
