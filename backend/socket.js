@@ -61,6 +61,19 @@ exports.init = (server, corsOptions) => {
       socket.broadcast.to(conversationId).emit("newMessage", msg);
     });
 
+    // Handle file upload notifications
+    socket.on("fileUploaded", (data) => {
+      const { conversationId, fileMetadata, receiverId } = data;
+      console.log(`File uploaded notification for conversation ${conversationId}`);
+      
+      // Notify the receiver about the new file
+      socket.broadcast.to(conversationId).emit("fileReceived", {
+        fileMetadata,
+        senderId: socketUser,
+        timestamp: new Date()
+      });
+    });
+
     // File sharing events
     socket.on("file:uploaded", (data) => {
       const { conversationId, receiverId, fileMetadata } = data;

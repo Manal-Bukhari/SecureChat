@@ -1,7 +1,9 @@
+const dotenv = require("dotenv");
+dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const dotenv = require("dotenv");
 const http = require("http");
 const connectDB = require("./src/config/database");
 const { init: initSocket } = require("./src/config/socket");
@@ -14,9 +16,7 @@ const groupRoutes = require("./src/routes/groupRoutes");
 // Added line 14:
 const userRoutes = require("./src/routes/userRoutes");
 const callRoutes = require("./src/routes/callRoutes");
-const fileRoutes = require("./routes/fileRoutes");
-
-dotenv.config();
+const fileRoutes = require("./src/routes/fileRoutes");
 connectDB();
 
 const app = express();

@@ -24,7 +24,7 @@ const {
 router.post('/upload/request', authMiddleware, uploadRateLimit, enhancedValidation, scanFileContent, validateFileUpload, async (req, res) => {
   try {
     const { fileName, fileSize, mimeType, receiverId, conversationId, encryptedFileKey, iv, fileHash } = req.body;
-    const userId = req.user._id;
+    const userId = req.user.userId;
     const ip = req.ip || req.connection.remoteAddress;
 
     // Log file upload attempt
@@ -38,12 +38,23 @@ router.post('/upload/request', authMiddleware, uploadRateLimit, enhancedValidati
     }
 
     // Generate pre-signed URL
-    const { uploadUrl, fileId, fileKey, expiresIn } = await fileUploadService.generatePresignedUploadUrl(
-      userId.toString(),
-      fileName,
-      fileSize,
-      mimeType
-    );
+    let uploadData;
+    try {
+      uploadData = await fileUploadService.generatePresignedUploadUrl(
+        userId.toString(),
+        fileName,
+        fileSize,
+        mimeType
+      );
+    } catch (serviceError) {
+      console.error('File upload service error:', serviceError.message);
+      return res.status(500).json({ 
+        error: 'File upload service unavailable', 
+        details: serviceError.message 
+      });
+    }
+
+    const { uploadUrl, fileId, fileKey, expiresIn } = uploadData;
 
     // Save metadata to database
     const fileMetadata = new FileMetadata({
@@ -94,7 +105,7 @@ router.post('/upload/request', authMiddleware, uploadRateLimit, enhancedValidati
 router.post('/upload/complete', authMiddleware, async (req, res) => {
   try {
     const { fileId } = req.body;
-    const userId = req.user._id;
+    const userId = req.user.userId;
 
     if (!fileId) {
       return res.status(400).json({ error: 'File ID is required' });
@@ -127,15 +138,19 @@ router.post('/upload/complete', authMiddleware, async (req, res) => {
     fileMetadata.uploadedAt = new Date();
     await fileMetadata.save();
 
+    // Generate download URL for the uploaded file
+    const downloadUrl = await fileUploadService.generatePresignedDownloadUrl(fileMetadata.s3Key);
+
     res.status(200).json({ 
       success: true, 
       message: 'Upload completed successfully',
-      fileMetadata: {
+      file: {
         fileId: fileMetadata.fileId,
         fileName: fileMetadata.fileName,
         fileSize: fileMetadata.fileSize,
         mimeType: fileMetadata.mimeType,
-        uploadedAt: fileMetadata.uploadedAt
+        uploadedAt: fileMetadata.uploadedAt,
+        downloadUrl: downloadUrl
       }
     });
 
@@ -156,7 +171,7 @@ router.post('/upload/complete', authMiddleware, async (req, res) => {
 router.get('/download/:fileId', authMiddleware, downloadRateLimit, enhancedValidation, validateFileDownload, async (req, res) => {
   try {
     const { fileId } = req.params;
-    const userId = req.user._id;
+    const userId = req.user.userId;
     const ip = req.ip || req.connection.remoteAddress;
 
     // Log download attempt
@@ -217,7 +232,7 @@ router.get('/download/:fileId', authMiddleware, downloadRateLimit, enhancedValid
 router.delete('/:fileId', authMiddleware, validateFileDelete, async (req, res) => {
   try {
     const { fileId } = req.params;
-    const userId = req.user._id;
+    const userId = req.user.userId;
 
     const fileMetadata = await FileMetadata.findOne({ fileId, senderId: userId });
 
@@ -258,7 +273,7 @@ router.delete('/:fileId', authMiddleware, validateFileDelete, async (req, res) =
 router.get('/conversation/:conversationId', authMiddleware, async (req, res) => {
   try {
     const { conversationId } = req.params;
-    const userId = req.user._id;
+    const userId = req.user.userId;
     const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Max 100 files
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const skip = (page - 1) * limit;
